@@ -329,8 +329,14 @@ export default function RingsidePickemFinal() {
     setSelectedMethod({});
     
     const unsubPreds = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'predictions'), (snap) => {
-      const preds = {}; snap.forEach(doc => { preds[doc.id] = doc.data(); }); 
-      setPredictions(preds);
+      if (snap.empty) {
+        // Explicitly clear predictions if collection is empty
+        setPredictions({});
+      } else {
+        const preds = {}; 
+        snap.forEach(doc => { preds[doc.id] = doc.data(); }); 
+        setPredictions(preds);
+      }
     });
     
     // FIXED: Use 6 segment path for document listener: artifacts/appId/public/data/scores/global

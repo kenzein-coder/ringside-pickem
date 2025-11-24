@@ -128,27 +128,48 @@ async function resetAllAccounts() {
       console.log(`✅ Deleted ${deletedUsers} user profiles\n`);
     }
 
-    // Delete all predictions
+    // Delete all predictions - need to find all user UIDs that have predictions
     console.log('🔄 Deleting all predictions...');
     let deletedPredictions = 0;
     
+    // First, try to get users from profiles
     const allUsersSnapshot = await getDocs(usersRef);
-    for (const userDoc of allUsersSnapshot.docs) {
-      const predictionsRef = collection(db, 'artifacts', appId, 'users', userDoc.id, 'predictions');
-      const predictionsSnapshot = await getDocs(predictionsRef);
-      
-      const predBatch = writeBatch(db);
-      let predBatchCount = 0;
-      
-      predictionsSnapshot.forEach((predDoc) => {
-        const predRef = doc(db, 'artifacts', appId, 'users', userDoc.id, 'predictions', predDoc.id);
-        predBatch.delete(predRef);
-        predBatchCount++;
-        deletedPredictions++;
+    const userIdsFromProfiles = new Set(allUsersSnapshot.docs.map(doc => doc.id));
+    
+    // Also check the users collection directly for any UIDs that might have predictions
+    // but no profile
+    try {
+      const usersCollectionRef = collection(db, 'artifacts', appId, 'users');
+      const usersCollectionSnapshot = await getDocs(usersCollectionRef);
+      usersCollectionSnapshot.docs.forEach(userDoc => {
+        userIdsFromProfiles.add(userDoc.id);
       });
+    } catch (error) {
+      console.log('  (Could not access users collection directly)');
+    }
+    
+    // Delete predictions for all found user IDs
+    for (const userId of userIdsFromProfiles) {
+      try {
+        const predictionsRef = collection(db, 'artifacts', appId, 'users', userId, 'predictions');
+        const predictionsSnapshot = await getDocs(predictionsRef);
+        
+        const predBatch = writeBatch(db);
+        let predBatchCount = 0;
+        
+        predictionsSnapshot.forEach((predDoc) => {
+          const predRef = doc(db, 'artifacts', appId, 'users', userId, 'predictions', predDoc.id);
+          predBatch.delete(predRef);
+          predBatchCount++;
+          deletedPredictions++;
+        });
 
-      if (predBatchCount > 0) {
-        await predBatch.commit();
+        if (predBatchCount > 0) {
+          await predBatch.commit();
+        }
+      } catch (error) {
+        // Skip if collection doesn't exist or can't be accessed
+        console.log(`  (Skipping predictions for user ${userId})`);
       }
     }
 
