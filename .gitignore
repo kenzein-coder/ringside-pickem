@@ -33,7 +33,6 @@ dist-ssr
 build
 *.tsbuildinfo
 
-data/
-*.html
+# Test data files
 data/
 *.html
