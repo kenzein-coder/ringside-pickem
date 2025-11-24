@@ -294,6 +294,11 @@ export default function RingsidePickemFinal() {
         setViewState('login');
         setUserId(null);
         setIsConnected(false);
+        // Clear user-specific data when logging out
+        setPredictions({});
+        setUserProfile(null);
+        setCommunitySentiment({});
+        setSelectedMethod({});
       }
       setAuthLoading(false);
       setIsLoggingIn(false);
@@ -303,7 +308,11 @@ export default function RingsidePickemFinal() {
 
   // --- DATA LISTENER ---
   useEffect(() => {
-    if (viewState !== 'dashboard' || !user) return;
+    if (viewState !== 'dashboard' || !user) {
+      // Clear predictions when not in dashboard or no user
+      setPredictions({});
+      return;
+    }
 
     const unsubProfile = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), (snap) => {
         if(snap.exists()) {
@@ -314,8 +323,14 @@ export default function RingsidePickemFinal() {
         }
     });
 
+    // Clear predictions before loading new user's predictions to prevent showing old data
+    setPredictions({});
+    setCommunitySentiment({});
+    setSelectedMethod({});
+    
     const unsubPreds = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'predictions'), (snap) => {
-      const preds = {}; snap.forEach(doc => { preds[doc.id] = doc.data(); }); setPredictions(preds);
+      const preds = {}; snap.forEach(doc => { preds[doc.id] = doc.data(); }); 
+      setPredictions(preds);
     });
     
     // FIXED: Use 6 segment path for document listener: artifacts/appId/public/data/scores/global
@@ -696,6 +711,10 @@ export default function RingsidePickemFinal() {
   const handleLogout = async () => {
       await signOut(auth);
       setUserProfile(null);
+      // Clear all user-specific data on logout
+      setPredictions({});
+      setCommunitySentiment({});
+      setSelectedMethod({});
   };
 
   const completeOnboarding = async () => {
