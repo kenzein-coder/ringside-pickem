@@ -387,6 +387,8 @@ export default function RingsidePickemFinal() {
           }
           
           console.log('📥 Predictions snapshot received for user:', currentUserId, 'Count:', snap.size);
+          console.log('🔍 Full path being listened to:', `artifacts/${appId}/users/${currentUserId}/predictions`);
+          console.log('🔍 Current appId:', appId);
           
           if (snap.empty) {
             // Explicitly clear predictions if collection is empty
@@ -396,9 +398,11 @@ export default function RingsidePickemFinal() {
             const preds = {}; 
             snap.forEach(doc => { 
               preds[doc.id] = doc.data();
-              console.log('📋 Loaded prediction for event:', doc.id);
+              console.log('📋 Loaded prediction for event:', doc.id, 'Full data:', JSON.stringify(doc.data()));
             }); 
             console.log('💾 Setting predictions state for user:', currentUserId, 'Events:', Object.keys(preds));
+            console.log('🔍 All prediction keys:', Object.keys(preds));
+            console.log('🔍 First prediction sample:', preds[Object.keys(preds)[0]]);
             setPredictions(preds);
           }
           
@@ -879,7 +883,11 @@ export default function RingsidePickemFinal() {
     setPredictions(prev => ({ ...prev, [eventId]: newPreds }));
     
     const predictionPath = `artifacts/${appId}/users/${user.uid}/predictions/${eventId}`;
-    console.log('Saving prediction to:', predictionPath);
+    console.log('💾 Saving prediction to:', predictionPath);
+    console.log('🔍 User UID:', user.uid);
+    console.log('🔍 App ID:', appId);
+    console.log('🔍 Event ID:', eventId);
+    console.log('🔍 Prediction data:', JSON.stringify(newPreds));
     
     setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'predictions', eventId), newPreds, { merge: true })
       .then(() => {
