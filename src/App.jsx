@@ -419,9 +419,18 @@ export default function RingsidePickemFinal() {
     });
 
     return () => {
-      unsubProfile(); unsubPreds(); unsubResults(); unsubLb(); unsubEvents();
+      // Clean up all listeners when user changes or component unmounts
+      unsubProfile(); 
+      unsubPreds(); 
+      unsubResults(); 
+      unsubLb(); 
+      unsubEvents();
+      // Also clear state to prevent stale data
+      setPredictions({});
+      setCommunitySentiment({});
+      setSelectedMethod({});
     };
-  }, [viewState, user]);
+  }, [viewState, user?.uid]); // Re-run when user.uid changes
 
   // Calculate community sentiment when event is selected
   useEffect(() => {
