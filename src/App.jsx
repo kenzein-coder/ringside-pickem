@@ -331,21 +331,32 @@ export default function RingsidePickemFinal() {
     });
 
     // Set up predictions listener for THIS specific user
+    // Capture user.uid in closure to ensure we're using the correct user
+    const currentUserId = user.uid;
+    console.log('Setting up predictions listener for user:', currentUserId);
+    
     const unsubPreds = onSnapshot(
-      collection(db, 'artifacts', appId, 'users', user.uid, 'predictions'), 
+      collection(db, 'artifacts', appId, 'users', currentUserId, 'predictions'), 
       (snap) => {
         // Double-check we're still listening to the correct user
-        if (!user || !user.uid) {
+        if (!user || user.uid !== currentUserId) {
+          console.log('User changed, ignoring predictions update. Current:', user?.uid, 'Listener:', currentUserId);
           setPredictions({});
           return;
         }
         
+        console.log('Predictions update for user:', currentUserId, 'Count:', snap.size);
+        
         if (snap.empty) {
           // Explicitly clear predictions if collection is empty
+          console.log('No predictions found, clearing state');
           setPredictions({});
         } else {
           const preds = {}; 
-          snap.forEach(doc => { preds[doc.id] = doc.data(); }); 
+          snap.forEach(doc => { 
+            preds[doc.id] = doc.data();
+            console.log('Loaded prediction for event:', doc.id, 'Data:', doc.data());
+          }); 
           setPredictions(preds);
         }
       },
@@ -787,6 +798,13 @@ export default function RingsidePickemFinal() {
   };
 
   const makePrediction = (eventId, matchId, winner, method = null) => {
+    if (!user || !user.uid) {
+      console.error('Cannot make prediction: no user logged in');
+      return;
+    }
+    
+    console.log('Making prediction for user:', user.uid, 'Event:', eventId, 'Match:', matchId, 'Winner:', winner);
+    
     const currentPreds = predictions[eventId] || {};
     // Support both old format (string) and new format (object with winner and method)
     const newPreds = { 
@@ -797,11 +815,19 @@ export default function RingsidePickemFinal() {
       } : winner // Backward compatible: if no method, store as string
     };
     setPredictions(prev => ({ ...prev, [eventId]: newPreds }));
-    if(user) {
-      setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'predictions', eventId), newPreds, { merge: true });
-      // Recalculate community sentiment after making a prediction
-      setTimeout(() => calculateCommunitySentiment(eventId), 1000);
-    }
+    
+    const predictionPath = `artifacts/${appId}/users/${user.uid}/predictions/${eventId}`;
+    console.log('Saving prediction to:', predictionPath);
+    
+    setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'predictions', eventId), newPreds, { merge: true })
+      .then(() => {
+        console.log('Prediction saved successfully');
+        // Recalculate community sentiment after making a prediction
+        setTimeout(() => calculateCommunitySentiment(eventId), 1000);
+      })
+      .catch((error) => {
+        console.error('Error saving prediction:', error);
+      });
   };
 
   // Calculate community sentiment (pick percentages) for an event
