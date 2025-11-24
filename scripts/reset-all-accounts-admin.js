@@ -17,7 +17,7 @@
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, readdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import readline from 'readline';
@@ -28,15 +28,29 @@ const __dirname = dirname(__filename);
 // Function to initialize Firebase Admin SDK
 function initializeFirebaseAdmin() {
   try {
-    const serviceAccountPath = join(__dirname, '../serviceAccountKey.json');
+    const projectRoot = join(__dirname, '..');
+    
+    // Try serviceAccountKey.json first
+    let serviceAccountPath = join(projectRoot, 'serviceAccountKey.json');
+    
+    // If not found, look for any firebase-adminsdk JSON files
     if (!existsSync(serviceAccountPath)) {
-      console.error('❌ serviceAccountKey.json not found!');
+      const files = readdirSync(projectRoot);
+      const adminKeyFile = files.find(f => f.includes('firebase-adminsdk') && f.endsWith('.json'));
+      if (adminKeyFile) {
+        serviceAccountPath = join(projectRoot, adminKeyFile);
+        console.log(`📁 Found service account key: ${adminKeyFile}`);
+      }
+    }
+    
+    if (!existsSync(serviceAccountPath)) {
+      console.error('❌ Service account key file not found!');
       console.error('\n📋 To get your service account key:');
       console.error('   1. Go to: https://console.firebase.google.com/');
       console.error('   2. Select your project: ringside-pick-em');
       console.error('   3. Go to: Project Settings → Service Accounts');
       console.error('   4. Click "Generate new private key"');
-      console.error('   5. Save the file as "serviceAccountKey.json" in the project root');
+      console.error('   5. Save the file in the project root');
       console.error('   6. Make sure it\'s in .gitignore (it should be)\n');
       return false;
     }
