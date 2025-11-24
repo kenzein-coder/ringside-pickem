@@ -4,6 +4,12 @@ import {
   getAuth, 
   signInAnonymously, 
   signInWithCustomToken,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+  updatePassword,
+  updateEmail,
+  updateProfile,
   signOut,
   onAuthStateChanged
 } from 'firebase/auth';
@@ -211,6 +217,20 @@ export default function RingsidePickemFinal() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false); // For onboarding submission
+  
+  // Account creation/login state
+  const [authMode, setAuthMode] = useState('guest'); // 'guest', 'signin', 'signup'
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  
+  // Account management state
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [accountError, setAccountError] = useState(null);
+  const [accountSuccess, setAccountSuccess] = useState(null);
 
   // Onboarding State
   const [onboardingPage, setOnboardingPage] = useState(1);
@@ -368,8 +388,208 @@ export default function RingsidePickemFinal() {
             ? "Firebase not configured. Please set up your .env file with Firebase credentials. See FIREBASE_SETUP.md"
             : error.message || "Connection failed. Please try again.";
           setLoginError(errorMessage);
+      } finally {
           setIsLoggingIn(false);
       }
+  };
+
+  const handleEmailSignUp = async () => {
+    if (!email.trim() || !password.trim() || !displayName.trim()) {
+      setLoginError('Please fill in all fields');
+      return;
+    }
+    if (password.length < 6) {
+      setLoginError('Password must be at least 6 characters');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setLoginError('Passwords do not match');
+      return;
+    }
+
+    setIsLoggingIn(true);
+    setLoginError(null);
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      await updateProfile(userCredential.user, { displayName: displayName.trim() });
+      
+      // Create user profile in Firestore
+      const profile = {
+        displayName: displayName.trim(),
+        email: email.trim(),
+        subscriptions: ['wwe', 'aew', 'njpw'],
+        totalPoints: 0,
+        predictionsCorrect: 0,
+        predictionsTotal: 0,
+        joinedAt: serverTimestamp(),
+        country: 'USA',
+        region: 'NA'
+      };
+      
+      await setDoc(
+        doc(db, 'artifacts', appId, 'public', 'data', 'users', userCredential.user.uid),
+        profile
+      );
+      
+      setUserProfile({ ...profile, joinedAt: new Date().toISOString() });
+      setViewState('dashboard');
+    } catch (error) {
+      console.error("Sign up error:", error);
+      let errorMessage = "Failed to create account. ";
+      if (error.code === 'auth/email-already-in-use') {
+        errorMessage = "Email already in use. Please sign in instead.";
+      } else if (error.code === 'auth/weak-password') {
+        errorMessage = "Password is too weak. Please use a stronger password.";
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = "Invalid email address.";
+      } else {
+        errorMessage += error.message || "Please try again.";
+      }
+      setLoginError(errorMessage);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleEmailSignIn = async () => {
+    if (!email.trim() || !password.trim()) {
+      setLoginError('Please enter email and password');
+      return;
+    }
+
+    setIsLoggingIn(true);
+    setLoginError(null);
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      // User profile will be loaded by the auth state listener
+    } catch (error) {
+      console.error("Sign in error:", error);
+      let errorMessage = "Failed to sign in. ";
+      if (error.code === 'auth/user-not-found') {
+        errorMessage = "No account found with this email. Please sign up first.";
+      } else if (error.code === 'auth/wrong-password') {
+        errorMessage = "Incorrect password. Please try again.";
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = "Invalid email address.";
+      } else if (error.code === 'auth/too-many-requests') {
+        errorMessage = "Too many failed attempts. Please try again later.";
+      } else {
+        errorMessage += error.message || "Please try again.";
+      }
+      setLoginError(errorMessage);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handlePasswordReset = async () => {
+    if (!email.trim()) {
+      setLoginError('Please enter your email address');
+      return;
+    }
+    try {
+      await sendPasswordResetEmail(auth, email);
+      setLoginError('Password reset email sent! Check your inbox.');
+    } catch (error) {
+      console.error("Password reset error:", error);
+      setLoginError(error.message || "Failed to send reset email.");
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (!newPassword.trim() || !confirmNewPassword.trim()) {
+      setAccountError('Please fill in both password fields');
+      return;
+    }
+    if (newPassword.length < 6) {
+      setAccountError('Password must be at least 6 characters');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setAccountError('Passwords do not match');
+      return;
+    }
+
+    setAccountError(null);
+    setAccountSuccess(null);
+    try {
+      if (user) {
+        await updatePassword(user, newPassword);
+        setAccountSuccess('Password updated successfully!');
+        setNewPassword('');
+        setConfirmNewPassword('');
+      }
+    } catch (error) {
+      console.error("Change password error:", error);
+      let errorMessage = "Failed to update password. ";
+      if (error.code === 'auth/requires-recent-login') {
+        errorMessage = "Please sign out and sign in again before changing your password.";
+      } else {
+        errorMessage += error.message || "Please try again.";
+      }
+      setAccountError(errorMessage);
+    }
+  };
+
+  const handleChangeEmail = async () => {
+    if (!newEmail.trim()) {
+      setAccountError('Please enter a new email address');
+      return;
+    }
+    if (newEmail === user?.email) {
+      setAccountError('This is already your current email');
+      return;
+    }
+
+    setAccountError(null);
+    setAccountSuccess(null);
+    try {
+      if (user) {
+        await updateEmail(user, newEmail);
+        // Update email in Firestore profile
+        await updateDoc(
+          doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid),
+          { email: newEmail.trim() }
+        );
+        setAccountSuccess('Email updated successfully!');
+        setNewEmail('');
+      }
+    } catch (error) {
+      console.error("Change email error:", error);
+      let errorMessage = "Failed to update email. ";
+      if (error.code === 'auth/requires-recent-login') {
+        errorMessage = "Please sign out and sign in again before changing your email.";
+      } else if (error.code === 'auth/email-already-in-use') {
+        errorMessage = "This email is already in use by another account.";
+      } else {
+        errorMessage += error.message || "Please try again.";
+      }
+      setAccountError(errorMessage);
+    }
+  };
+
+  const handleUpdateDisplayName = async () => {
+    if (!displayName.trim()) {
+      setAccountError('Please enter a display name');
+      return;
+    }
+
+    setAccountError(null);
+    setAccountSuccess(null);
+    try {
+      if (user) {
+        await updateProfile(user, { displayName: displayName.trim() });
+        // Update display name in Firestore profile
+        await updateDoc(
+          doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid),
+          { displayName: displayName.trim() }
+        );
+        setAccountSuccess('Display name updated successfully!');
+      }
+    } catch (error) {
+      console.error("Update display name error:", error);
+      setAccountError(error.message || "Failed to update display name.");
+    }
   };
 
   const handleLogout = async () => {
@@ -499,8 +719,8 @@ export default function RingsidePickemFinal() {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col p-6 animate-fadeIn relative overflow-hidden">
          <div className="absolute top-0 left-0 w-full h-2/3 bg-gradient-to-b from-red-900/20 to-slate-950 z-0"></div>
-         <div className="relative z-10 flex flex-col h-full">
-            <div className="flex-1 flex flex-col items-center justify-center text-center space-y-6">
+         <div className="relative z-10 flex flex-col h-full max-w-md mx-auto w-full">
+            <div className="flex-1 flex flex-col items-center justify-center text-center space-y-6 mb-8">
                 <div className="w-24 h-24 bg-red-600 rounded-3xl flex items-center justify-center shadow-2xl shadow-red-900/50 mb-4 transform -rotate-3">
                    <Trophy className="text-white w-12 h-12" />
                 </div>
@@ -509,16 +729,157 @@ export default function RingsidePickemFinal() {
                    <p className="text-slate-400 max-w-xs mx-auto text-sm leading-relaxed">Predict winners. Climb ranks. Become a legend.</p>
                 </div>
             </div>
+            
+            {/* Auth Mode Tabs */}
+            <div className="flex gap-2 mb-6 bg-slate-900/50 p-1 rounded-xl border border-slate-800">
+              <button
+                onClick={() => { setAuthMode('guest'); setLoginError(null); }}
+                className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold transition-all ${
+                  authMode === 'guest' 
+                    ? 'bg-red-600 text-white' 
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Guest
+              </button>
+              <button
+                onClick={() => { setAuthMode('signin'); setLoginError(null); }}
+                className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold transition-all ${
+                  authMode === 'signin' 
+                    ? 'bg-red-600 text-white' 
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Sign In
+              </button>
+              <button
+                onClick={() => { setAuthMode('signup'); setLoginError(null); }}
+                className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold transition-all ${
+                  authMode === 'signup' 
+                    ? 'bg-red-600 text-white' 
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Sign Up
+              </button>
+            </div>
+
             <div className="space-y-4 mb-8">
-               {loginError && <div className="bg-red-900/30 text-red-400 p-3 rounded-lg text-xs text-center border border-red-900/50 mb-4">{loginError}</div>}
-               <button 
-                 onClick={handleGuestLogin}
-                 disabled={isLoggingIn}
-                 className="w-full bg-white hover:bg-slate-200 text-slate-900 py-4 rounded-xl font-bold flex items-center justify-center gap-3 transition-transform active:scale-95 shadow-xl"
-               >
-                  {isLoggingIn ? <Loader2 className="animate-spin" /> : <Shield size={20} />}
-                  {isLoggingIn ? "Connecting..." : "Continue as Guest"}
-               </button>
+               {loginError && (
+                 <div className={`p-3 rounded-lg text-xs text-center border ${
+                   loginError.includes('sent') || loginError.includes('Check')
+                     ? 'bg-green-900/30 text-green-400 border-green-900/50'
+                     : 'bg-red-900/30 text-red-400 border-red-900/50'
+                 }`}>
+                   {loginError}
+                 </div>
+               )}
+
+               {/* Guest Login */}
+               {authMode === 'guest' && (
+                 <button 
+                   onClick={handleGuestLogin}
+                   disabled={isLoggingIn}
+                   className="w-full bg-white hover:bg-slate-200 text-slate-900 py-4 rounded-xl font-bold flex items-center justify-center gap-3 transition-transform active:scale-95 shadow-xl disabled:opacity-50"
+                 >
+                    {isLoggingIn ? <Loader2 className="animate-spin" /> : <Shield size={20} />}
+                    {isLoggingIn ? "Connecting..." : "Continue as Guest"}
+                 </button>
+               )}
+
+               {/* Sign In Form */}
+               {authMode === 'signin' && (
+                 <div className="space-y-4">
+                   <div>
+                     <input
+                       type="email"
+                       placeholder="Email"
+                       value={email}
+                       onChange={(e) => setEmail(e.target.value)}
+                       className="w-full bg-slate-900/50 border border-slate-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
+                       disabled={isLoggingIn}
+                     />
+                   </div>
+                   <div>
+                     <input
+                       type="password"
+                       placeholder="Password"
+                       value={password}
+                       onChange={(e) => setPassword(e.target.value)}
+                       onKeyPress={(e) => e.key === 'Enter' && handleEmailSignIn()}
+                       className="w-full bg-slate-900/50 border border-slate-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
+                       disabled={isLoggingIn}
+                     />
+                   </div>
+                   <button
+                     onClick={handleEmailSignIn}
+                     disabled={isLoggingIn}
+                     className="w-full bg-red-600 hover:bg-red-700 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-3 transition-all disabled:opacity-50"
+                   >
+                     {isLoggingIn ? <Loader2 className="animate-spin" /> : 'Sign In'}
+                   </button>
+                   <button
+                     onClick={handlePasswordReset}
+                     className="w-full text-slate-400 hover:text-white text-sm font-medium"
+                   >
+                     Forgot password?
+                   </button>
+                 </div>
+               )}
+
+               {/* Sign Up Form */}
+               {authMode === 'signup' && (
+                 <div className="space-y-4">
+                   <div>
+                     <input
+                       type="text"
+                       placeholder="Display Name"
+                       value={displayName}
+                       onChange={(e) => setDisplayName(e.target.value)}
+                       className="w-full bg-slate-900/50 border border-slate-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
+                       disabled={isLoggingIn}
+                     />
+                   </div>
+                   <div>
+                     <input
+                       type="email"
+                       placeholder="Email"
+                       value={email}
+                       onChange={(e) => setEmail(e.target.value)}
+                       className="w-full bg-slate-900/50 border border-slate-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
+                       disabled={isLoggingIn}
+                     />
+                   </div>
+                   <div>
+                     <input
+                       type="password"
+                       placeholder="Password (min. 6 characters)"
+                       value={password}
+                       onChange={(e) => setPassword(e.target.value)}
+                       className="w-full bg-slate-900/50 border border-slate-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
+                       disabled={isLoggingIn}
+                     />
+                   </div>
+                   <div>
+                     <input
+                       type="password"
+                       placeholder="Confirm Password"
+                       value={confirmPassword}
+                       onChange={(e) => setConfirmPassword(e.target.value)}
+                       onKeyPress={(e) => e.key === 'Enter' && handleEmailSignUp()}
+                       className="w-full bg-slate-900/50 border border-slate-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
+                       disabled={isLoggingIn}
+                     />
+                   </div>
+                   <button
+                     onClick={handleEmailSignUp}
+                     disabled={isLoggingIn}
+                     className="w-full bg-red-600 hover:bg-red-700 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-3 transition-all disabled:opacity-50"
+                   >
+                     {isLoggingIn ? <Loader2 className="animate-spin" /> : 'Create Account'}
+                   </button>
+                 </div>
+               )}
             </div>
          </div>
       </div>
@@ -732,12 +1093,134 @@ export default function RingsidePickemFinal() {
         )}
 
         {activeTab === 'settings' && (
-           <div className="space-y-6 animate-fadeIn">
+           <div className="space-y-6 animate-fadeIn pb-24">
               <h2 className="text-2xl font-black text-white">Settings</h2>
+              
+              {/* Account Info */}
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
                  <h3 className="text-sm font-bold text-slate-400 uppercase mb-4">Account</h3>
-                 <div className="flex items-center justify-between mb-4"><div><div className="font-bold text-white">{userProfile?.displayName}</div><div className="text-xs text-slate-500">ID: {user?.uid?.substring(0,6)}...</div></div><button onClick={handleLogout} className="bg-red-900/20 hover:bg-red-900/40 text-red-400 px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-colors"><LogOut size={14} /> Sign Out</button></div>
+                 <div className="space-y-4">
+                   <div className="flex items-center justify-between">
+                     <div>
+                       <div className="font-bold text-white">{userProfile?.displayName || user?.displayName || 'Guest User'}</div>
+                       <div className="text-xs text-slate-500">
+                         {user?.email || 'Anonymous account'}
+                       </div>
+                       <div className="text-xs text-slate-600">ID: {user?.uid?.substring(0,8)}...</div>
+                     </div>
+                     <button onClick={handleLogout} className="bg-red-900/20 hover:bg-red-900/40 text-red-400 px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-colors">
+                       <LogOut size={14} /> Sign Out
+                     </button>
+                   </div>
+                   
+                   {accountError && (
+                     <div className="bg-red-900/30 text-red-400 p-3 rounded-lg text-xs border border-red-900/50">
+                       {accountError}
+                     </div>
+                   )}
+                   
+                   {accountSuccess && (
+                     <div className="bg-green-900/30 text-green-400 p-3 rounded-lg text-xs border border-green-900/50">
+                       {accountSuccess}
+                     </div>
+                   )}
+                 </div>
               </div>
+
+              {/* Update Display Name */}
+              {user && !user.isAnonymous && (
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                  <h3 className="text-sm font-bold text-slate-400 uppercase mb-4">Display Name</h3>
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      placeholder="Display Name"
+                      value={displayName || userProfile?.displayName || user?.displayName || ''}
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      className="w-full bg-slate-950/50 border border-slate-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
+                    />
+                    <button
+                      onClick={handleUpdateDisplayName}
+                      className="w-full bg-slate-800 hover:bg-slate-700 text-white py-2 rounded-lg text-sm font-bold transition-colors"
+                    >
+                      Update Display Name
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Change Email */}
+              {user && !user.isAnonymous && (
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                  <h3 className="text-sm font-bold text-slate-400 uppercase mb-4">Change Email</h3>
+                  <div className="space-y-3">
+                    <div className="text-xs text-slate-500 mb-2">Current: {user.email}</div>
+                    <input
+                      type="email"
+                      placeholder="New Email"
+                      value={newEmail}
+                      onChange={(e) => setNewEmail(e.target.value)}
+                      className="w-full bg-slate-950/50 border border-slate-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
+                    />
+                    <button
+                      onClick={handleChangeEmail}
+                      className="w-full bg-slate-800 hover:bg-slate-700 text-white py-2 rounded-lg text-sm font-bold transition-colors"
+                    >
+                      Update Email
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Change Password */}
+              {user && !user.isAnonymous && (
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                  <h3 className="text-sm font-bold text-slate-400 uppercase mb-4">Change Password</h3>
+                  <div className="space-y-3">
+                    <input
+                      type="password"
+                      placeholder="New Password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="w-full bg-slate-950/50 border border-slate-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
+                    />
+                    <input
+                      type="password"
+                      placeholder="Confirm New Password"
+                      value={confirmNewPassword}
+                      onChange={(e) => setConfirmNewPassword(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && handleChangePassword()}
+                      className="w-full bg-slate-950/50 border border-slate-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
+                    />
+                    <button
+                      onClick={handleChangePassword}
+                      className="w-full bg-slate-800 hover:bg-slate-700 text-white py-2 rounded-lg text-sm font-bold transition-colors"
+                    >
+                      Update Password
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Guest Account Upgrade Notice */}
+              {user && user.isAnonymous && (
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                  <h3 className="text-sm font-bold text-slate-400 uppercase mb-2">Upgrade to Account</h3>
+                  <p className="text-xs text-slate-500 mb-3">
+                    Create an account to save your predictions and settings permanently.
+                  </p>
+                  <button
+                    onClick={() => {
+                      handleLogout();
+                      setViewState('login');
+                      setAuthMode('signup');
+                    }}
+                    className="w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg text-sm font-bold transition-colors"
+                  >
+                    Create Account
+                  </button>
+                </div>
+              )}
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
                  <h3 className="text-sm font-bold text-slate-400 uppercase mb-4">Promotions</h3>
                  <div className="space-y-3">
