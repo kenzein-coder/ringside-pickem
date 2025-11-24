@@ -98,20 +98,37 @@ function parseHTML(html) {
   
   // Extract promotions from promotion list page (id=8)
   // Format: <a href="?id=8&nr=123">Promotion Name</a>
-  const promoRegex = /<a[^>]*href="\?id=8&amp;nr=(\d+)"[^>]*>([^<]+)<\/a>/gi;
+  // Also extract logo: <img src="/site/main/img/ligen/normal/{id}.gif" ...>
+  const promoRowRegex = /<tr[^>]*class="TRow[^"]*"[^>]*>([\s\S]*?)<\/tr>/gi;
   let match;
   const seenPromos = new Set();
   
-  while ((match = promoRegex.exec(html)) !== null) {
-    const id = match[1];
-    const name = match[2].trim();
+  while ((match = promoRowRegex.exec(html)) !== null) {
+    const row = match[1];
+    
+    // Extract promotion ID and name from link
+    const promoLinkMatch = row.match(/<a[^>]*href="\?id=8&amp;nr=(\d+)"[^>]*>([^<]+)<\/a>/);
+    if (!promoLinkMatch) continue;
+    
+    const id = promoLinkMatch[1];
+    const name = promoLinkMatch[2].trim();
+    
     if (!seenPromos.has(id) && name.length > 0 && !name.includes('<img')) {
       seenPromos.add(id);
+      
+      // Extract logo URL: <img src="/site/main/img/ligen/normal/{id}.gif" ...>
+      const logoMatch = row.match(/<img[^>]*src="([^"]*ligen[^"]*)"[^>]*class="[^"]*ImagePromotionLogo[^"]*"/);
+      let logoUrl = null;
+      if (logoMatch) {
+        logoUrl = 'https://www.cagematch.net' + logoMatch[1];
+      }
+      
       results.promotions.push({
         id: id,
         name: name,
         cagematchId: id,
-        slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+        slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+        logoUrl: logoUrl
       });
     }
   }
@@ -266,6 +283,8 @@ function parseEventDetails(html) {
     venue: null,
     arena: null,
     location: null,
+    posterUrl: null,
+    bannerUrl: null,
     matches: []
   };
   
@@ -290,6 +309,19 @@ function parseEventDetails(html) {
   // Combine location and arena for venue
   if (details.location || details.arena) {
     details.venue = [details.arena, details.location].filter(Boolean).join(', ');
+  }
+  
+  // Extract event poster/banner from header
+  // Look for large promotion logo in header: <img src="/site/main/img/ligen/normal/{id}_{name}.gif" class="ImagePromotionLogo ImagePromotionLogo_normal"
+  const headerLogoMatch = html.match(/<img[^>]*src="([^"]*ligen[^"]*)"[^>]*class="[^"]*ImagePromotionLogo[^"]*ImagePromotionLogo_normal[^"]*"/);
+  if (headerLogoMatch) {
+    details.bannerUrl = 'https://www.cagematch.net' + headerLogoMatch[1];
+  }
+  
+  // Look for event poster image (if available in InformationBox or elsewhere)
+  const posterMatch = html.match(/<img[^>]*src="([^"]*poster[^"]*\.(jpg|jpeg|png|gif|webp))"[^>]*/i);
+  if (posterMatch) {
+    details.posterUrl = posterMatch[1].startsWith('http') ? posterMatch[1] : 'https://www.cagematch.net' + posterMatch[1];
   }
   
   // Extract matches from <div class="Matches"> - match until ContentDivider
@@ -331,14 +363,20 @@ function parseEventDetails(html) {
       if (resultsMatch) {
         const resultsHtml = resultsMatch[1];
         
-        // Extract all wrestler names from links (skip managers in parentheses)
-        const wrestlerPattern = /<a[^>]*href="\?id=2&amp;nr=\d+[^"]*"[^>]*>([^<]+)<\/a>/g;
+        // Extract all wrestler names and IDs from links (skip managers in parentheses)
+        const wrestlerPattern = /<a[^>]*href="\?id=2&amp;nr=(\d+)[^"]*"[^>]*>([^<]+)<\/a>/g;
         const allLinks = [];
         let linkMatch;
         while ((linkMatch = wrestlerPattern.exec(resultsHtml)) !== null) {
+          const wrestlerId = linkMatch[1];
+          const wrestlerName = linkMatch[2].trim();
+          // Construct potential image URL (Cagematch uses /site/main/img/wrestler/{id}.jpg or similar)
+          const imageUrl = `https://www.cagematch.net/site/main/img/wrestler/${wrestlerId}.jpg`;
           allLinks.push({
-            name: linkMatch[1].trim(),
-            position: linkMatch.index
+            id: wrestlerId,
+            name: wrestlerName,
+            position: linkMatch.index,
+            imageUrl: imageUrl
           });
         }
         
@@ -347,6 +385,8 @@ function parseEventDetails(html) {
         let loser = null;
         let p1 = null;
         let p2 = null;
+        let p1Image = null;
+        let p2Image = null;
         
         if (resultsHtml.includes('defeats')) {
           const defeatsIndex = resultsHtml.indexOf('defeats');
@@ -354,8 +394,10 @@ function parseEventDetails(html) {
           // Get last link before "defeats" as winner
           const beforeDefeats = allLinks.filter(l => l.position < defeatsIndex);
           if (beforeDefeats.length > 0) {
-            winner = beforeDefeats[beforeDefeats.length - 1].name;
+            const winnerLink = beforeDefeats[beforeDefeats.length - 1];
+            winner = winnerLink.name;
             p1 = winner;
+            p1Image = winnerLink.imageUrl;
           }
           
           // Get first link after "defeats" (before time) as loser
@@ -368,6 +410,7 @@ function parseEventDetails(html) {
             }) || afterDefeats[0];
             loser = loserLink.name;
             p2 = loser;
+            p2Image = loserLink.imageUrl;
           }
         } else if (allLinks.length >= 2) {
           // If no "defeats", use first two main wrestlers (skip managers)
@@ -379,10 +422,14 @@ function parseEventDetails(html) {
           
           if (mainWrestlers.length >= 2) {
             p1 = mainWrestlers[0].name;
+            p1Image = mainWrestlers[0].imageUrl;
             p2 = mainWrestlers[1].name;
+            p2Image = mainWrestlers[1].imageUrl;
           } else if (allLinks.length >= 2) {
             p1 = allLinks[0].name;
+            p1Image = allLinks[0].imageUrl;
             p2 = allLinks[1].name;
+            p2Image = allLinks[1].imageUrl;
           }
         }
         
@@ -404,6 +451,8 @@ function parseEventDetails(html) {
             type: matchType,
             p1: p1,
             p2: p2,
+            p1Image: p1Image,
+            p2Image: p2Image,
             winner: winner,
             time: matchTime,
             title: title || matchType

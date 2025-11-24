@@ -165,18 +165,20 @@ const INITIAL_EVENTS = [
 
 // --- HELPER COMPONENTS ---
 
-const BrandLogo = ({ id, className = "w-full h-full object-contain" }) => {
+const BrandLogo = ({ id, className = "w-full h-full object-contain", logoUrl }) => {
   const [error, setError] = useState(false);
-  const url = LOGO_URLS[id];
-  useEffect(() => { setError(false); }, [id]);
+  // Use scraped logoUrl if available, otherwise fall back to hardcoded LOGO_URLS
+  const url = logoUrl || LOGO_URLS[id];
+  useEffect(() => { setError(false); }, [id, logoUrl]);
   if (error || !url) return <div className={`w-full h-full flex items-center justify-center bg-slate-800 text-slate-400 font-black text-[10px] uppercase border border-slate-700 rounded tracking-tighter`}>{id.substring(0, 4)}</div>;
-  return <img src={url} alt={id} className={className} onError={() => setError(true)} referrerPolicy="no-referrer" loading="lazy" />;
+  return <img src={url} alt={id} className={className} onError={() => setError(true)} referrerPolicy="no-referrer" loading="lazy" crossOrigin="anonymous" />;
 };
 
-const WrestlerImage = ({ name, className }) => {
+const WrestlerImage = ({ name, className, imageUrl }) => {
   const [error, setError] = useState(false);
-  const url = WRESTLER_IMAGES[name];
-  useEffect(() => { setError(false); }, [name]);
+  // Use scraped imageUrl if available, otherwise fall back to hardcoded WRESTLER_IMAGES
+  const url = imageUrl || WRESTLER_IMAGES[name];
+  useEffect(() => { setError(false); }, [name, imageUrl]);
   if (error || !url) {
     const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
     return (
@@ -186,7 +188,7 @@ const WrestlerImage = ({ name, className }) => {
       </div>
     );
   }
-  return <img src={url} alt={name} className={`object-cover ${className}`} onError={() => setError(true)} referrerPolicy="no-referrer" loading="lazy" />;
+  return <img src={url} alt={name} className={`object-cover ${className}`} onError={() => setError(true)} referrerPolicy="no-referrer" loading="lazy" crossOrigin="anonymous" />;
 };
 
 const Toggle = ({ enabled, onClick }) => (
@@ -301,10 +303,23 @@ export default function RingsidePickemFinal() {
       orderBy('date', 'desc'),
       limit(50)
     );
-    const unsubEvents = onSnapshot(eventsQuery, (snap) => {
+    const unsubEvents = onSnapshot(eventsQuery, async (snap) => {
       const events = [];
-      snap.forEach(d => {
+      for (const d of snap.docs) {
         const data = d.data();
+        // Fetch promotion logo if promotionId is available
+        let promotionLogoUrl = null;
+        if (data.promotionId) {
+          try {
+            const promoDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'promotions', data.promotionId));
+            if (promoDoc.exists()) {
+              promotionLogoUrl = promoDoc.data().logoUrl;
+            }
+          } catch (e) {
+            // Silently fail if promotion not found
+          }
+        }
+        
         // Map Firestore data structure to app's expected structure
         events.push({
           id: d.id,
@@ -317,11 +332,14 @@ export default function RingsidePickemFinal() {
           date: data.date,
           venue: data.venue || data.location,
           matches: data.matches || [],
+          bannerUrl: data.bannerUrl,
+          posterUrl: data.posterUrl,
+          promotionLogoUrl: promotionLogoUrl,
           // Keep original data for reference
           promotionId: data.promotionId,
           promotionName: data.promotionName
         });
-      });
+      }
       setScrapedEvents(events);
     });
 
@@ -607,11 +625,12 @@ export default function RingsidePickemFinal() {
             ) : (
               myEvents.map(event => {
                 const promo = PROMOTIONS.find(p => p.id === event.promoId);
-                const bgImage = EVENT_BACKGROUNDS[event.id] || EVENT_BACKGROUNDS['wwe-survivor-2025'];
+                // Use scraped bannerUrl/posterUrl if available, otherwise fall back to hardcoded EVENT_BACKGROUNDS
+                const bgImage = event.bannerUrl || event.posterUrl || EVENT_BACKGROUNDS[event.id] || EVENT_BACKGROUNDS['wwe-survivor-2025'];
                 const isGraded = eventResults[event.id];
                 return (
                   <div key={event.id} onClick={() => { setSelectedEvent(event); setActiveTab('event'); }} className="group relative bg-slate-900 hover:bg-slate-800 border border-slate-800 transition-all cursor-pointer rounded-2xl overflow-hidden shadow-xl" style={{ height: '200px' }}>
-                    <div className="absolute inset-0"><img src={bgImage} alt="poster" className="w-full h-full object-cover opacity-60 group-hover:opacity-40 transition-opacity duration-500 group-hover:scale-105" referrerPolicy="no-referrer" /><div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/80 to-transparent"></div></div>
+                    <div className="absolute inset-0"><img src={bgImage} alt="poster" className="w-full h-full object-cover opacity-60 group-hover:opacity-40 transition-opacity duration-500 group-hover:scale-105" referrerPolicy="no-referrer" crossOrigin="anonymous" /><div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/80 to-transparent"></div></div>
                     <div className="absolute inset-0 p-5 flex flex-col justify-end">
                       <div className="flex justify-between items-end">
                         <div className="flex-1">
@@ -692,11 +711,11 @@ export default function RingsidePickemFinal() {
                     <div className="text-center mb-2"><span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-slate-900 px-3 py-1 rounded-full border border-slate-800">{match.title}</span></div>
                     <div className="flex gap-1 h-64"> 
                       <div onClick={() => !actualWinner && makePrediction(selectedEvent.id, match.id, match.p1)} className={`flex-1 relative rounded-l-2xl overflow-hidden cursor-pointer transition-all duration-300 border-y border-l ${myPick === match.p1 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800 hover:border-slate-600'} ${actualWinner && actualWinner !== match.p1 ? 'grayscale opacity-50' : ''}`}>
-                         <WrestlerImage name={match.p1} className="w-full h-full" /><div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent pt-12 pb-3 px-2 text-center"><span className={`block font-black text-lg uppercase leading-none ${myPick === match.p1 ? 'text-red-500' : 'text-white'}`}>{match.p1}</span>{myPick === match.p1 && <span className="text-[8px] font-bold bg-red-600 text-white px-2 py-0.5 rounded-full inline-block mt-1">YOUR PICK</span>}</div>{actualWinner === match.p1 && <div className="absolute top-2 left-2 bg-green-500 text-black text-[10px] font-black px-2 py-1 rounded uppercase shadow-lg z-20">Winner</div>}
+                         <WrestlerImage name={match.p1} className="w-full h-full" imageUrl={match.p1Image} /><div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent pt-12 pb-3 px-2 text-center"><span className={`block font-black text-lg uppercase leading-none ${myPick === match.p1 ? 'text-red-500' : 'text-white'}`}>{match.p1}</span>{myPick === match.p1 && <span className="text-[8px] font-bold bg-red-600 text-white px-2 py-0.5 rounded-full inline-block mt-1">YOUR PICK</span>}</div>{actualWinner === match.p1 && <div className="absolute top-2 left-2 bg-green-500 text-black text-[10px] font-black px-2 py-1 rounded uppercase shadow-lg z-20">Winner</div>}
                       </div>
                       <div className="w-1 bg-slate-900 flex items-center justify-center relative z-20"><div className="absolute bg-slate-950 border border-slate-700 rounded-full w-8 h-8 flex items-center justify-center text-[10px] font-black text-slate-500 italic shadow-xl">VS</div></div>
                       <div onClick={() => !actualWinner && makePrediction(selectedEvent.id, match.id, match.p2)} className={`flex-1 relative rounded-r-2xl overflow-hidden cursor-pointer transition-all duration-300 border-y border-r ${myPick === match.p2 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800 hover:border-slate-600'} ${actualWinner && actualWinner !== match.p2 ? 'grayscale opacity-50' : ''}`}>
-                         <WrestlerImage name={match.p2} className="w-full h-full" /><div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent pt-12 pb-3 px-2 text-center"><span className={`block font-black text-lg uppercase leading-none ${myPick === match.p2 ? 'text-red-500' : 'text-white'}`}>{match.p2}</span>{myPick === match.p2 && <span className="text-[8px] font-bold bg-red-600 text-white px-2 py-0.5 rounded-full inline-block mt-1">YOUR PICK</span>}</div>{actualWinner === match.p2 && <div className="absolute top-2 right-2 bg-green-500 text-black text-[10px] font-black px-2 py-1 rounded uppercase shadow-lg z-20">Winner</div>}
+                         <WrestlerImage name={match.p2} className="w-full h-full" imageUrl={match.p2Image} /><div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent pt-12 pb-3 px-2 text-center"><span className={`block font-black text-lg uppercase leading-none ${myPick === match.p2 ? 'text-red-500' : 'text-white'}`}>{match.p2}</span>{myPick === match.p2 && <span className="text-[8px] font-bold bg-red-600 text-white px-2 py-0.5 rounded-full inline-block mt-1">YOUR PICK</span>}</div>{actualWinner === match.p2 && <div className="absolute top-2 right-2 bg-green-500 text-black text-[10px] font-black px-2 py-1 rounded uppercase shadow-lg z-20">Winner</div>}
                       </div>
                     </div>
                     {actualWinner && <div className={`mt-2 text-center text-xs font-bold uppercase tracking-wider p-2 rounded-lg border ${isCorrect ? 'bg-green-900/20 border-green-900 text-green-400' : 'bg-red-900/20 border-red-900 text-red-400'}`}>{isCorrect ? '+10 POINTS' : 'INCORRECT'}</div>}
