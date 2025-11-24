@@ -27,7 +27,9 @@ import {
   serverTimestamp,
   increment,
   limit,
-  getDoc
+  getDoc,
+  getDocs,
+  where
 } from 'firebase/firestore';
 import { 
   Trophy, 
@@ -250,6 +252,8 @@ export default function RingsidePickemFinal() {
   const [isConnected, setIsConnected] = useState(false);
   const [userId, setUserId] = useState(null);
   const [scrapedEvents, setScrapedEvents] = useState([]); // Events from Firestore scraper
+  const [communitySentiment, setCommunitySentiment] = useState({}); // { eventId: { matchId: { p1: 65, p2: 35 } } }
+  const [selectedMethod, setSelectedMethod] = useState({}); // { eventId-matchId: 'pinfall' }
 
   // --- AUTH & INIT ---
   useEffect(() => {
@@ -372,6 +376,13 @@ export default function RingsidePickemFinal() {
       unsubProfile(); unsubPreds(); unsubResults(); unsubLb(); unsubEvents();
     };
   }, [viewState, user]);
+
+  // Calculate community sentiment when event is selected
+  useEffect(() => {
+    if (selectedEvent?.id && viewState === 'dashboard') {
+      calculateCommunitySentiment(selectedEvent.id);
+    }
+  }, [selectedEvent?.id, viewState]);
 
   // --- HANDLERS ---
 
@@ -695,11 +706,93 @@ export default function RingsidePickemFinal() {
     }
   };
 
-  const makePrediction = (eventId, matchId, winner) => {
+  const makePrediction = (eventId, matchId, winner, method = null) => {
     const currentPreds = predictions[eventId] || {};
-    const newPreds = { ...currentPreds, [matchId]: winner };
+    // Support both old format (string) and new format (object with winner and method)
+    const newPreds = { 
+      ...currentPreds, 
+      [matchId]: method ? {
+        winner: winner,
+        method: method
+      } : winner // Backward compatible: if no method, store as string
+    };
     setPredictions(prev => ({ ...prev, [eventId]: newPreds }));
-    if(user) setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'predictions', eventId), newPreds, { merge: true });
+    if(user) {
+      setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'predictions', eventId), newPreds, { merge: true });
+      // Recalculate community sentiment after making a prediction
+      setTimeout(() => calculateCommunitySentiment(eventId), 1000);
+    }
+  };
+
+  // Calculate community sentiment (pick percentages) for an event
+  const calculateCommunitySentiment = async (eventId) => {
+    if (!eventId) return;
+    
+    try {
+      // Get all user predictions for this event
+      const usersRef = collection(db, 'artifacts', appId, 'users');
+      const usersSnapshot = await getDocs(usersRef);
+      
+      const matchCounts = {};
+      
+      const promises = [];
+      usersSnapshot.forEach(userDoc => {
+        const userPredictionsRef = doc(db, 'artifacts', appId, 'users', userDoc.id, 'predictions', eventId);
+        promises.push(getDoc(userPredictionsRef));
+      });
+      
+      const predDocs = await Promise.all(promises);
+      
+      predDocs.forEach(predDoc => {
+        if (predDoc.exists()) {
+          const preds = predDoc.data();
+          Object.keys(preds).forEach(matchId => {
+            const pred = preds[matchId];
+            // Handle both old format (string) and new format (object)
+            const winner = typeof pred === 'string' ? pred : (pred.winner || pred);
+            
+            if (!matchCounts[matchId]) {
+              matchCounts[matchId] = { p1: 0, p2: 0 };
+            }
+            
+            // Get match info to determine p1 vs p2
+            const event = scrapedEvents.find(e => e.id === eventId) || 
+                        INITIAL_EVENTS.find(e => e.id === eventId);
+            if (event) {
+              const match = event.matches.find(m => m.id.toString() === matchId.toString());
+              if (match) {
+                if (winner === match.p1) {
+                  matchCounts[matchId].p1++;
+                } else if (winner === match.p2) {
+                  matchCounts[matchId].p2++;
+                }
+              }
+            }
+          });
+        }
+      });
+      
+      // Calculate percentages
+      const sentiment = {};
+      Object.keys(matchCounts).forEach(matchId => {
+        const counts = matchCounts[matchId];
+        const total = counts.p1 + counts.p2;
+        if (total > 0) {
+          sentiment[matchId] = {
+            p1: Math.round((counts.p1 / total) * 100),
+            p2: Math.round((counts.p2 / total) * 100),
+            total: total
+          };
+        }
+      });
+      
+      setCommunitySentiment(prev => ({
+        ...prev,
+        [eventId]: sentiment
+      }));
+    } catch (error) {
+      console.error("Error calculating community sentiment:", error);
+    }
   };
 
   const simulateEventResult = (event) => {
@@ -713,7 +806,12 @@ export default function RingsidePickemFinal() {
       
       let correctCount = 0;
       const myPreds = predictions[event.id] || {};
-      event.matches.forEach(m => { if (myPreds[m.id] === results[m.id]) correctCount++; });
+      event.matches.forEach(m => { 
+        const pred = myPreds[m.id];
+        // Handle both old format (string) and new format (object)
+        const predictedWinner = typeof pred === 'string' ? pred : (pred?.winner || pred);
+        if (predictedWinner === results[m.id]) correctCount++; 
+      });
       
       setUserProfile(prev => ({
           ...prev,
@@ -1204,22 +1302,97 @@ export default function RingsidePickemFinal() {
             </div>
             <div className="space-y-6">
               {selectedEvent.matches.map((match) => {
-                const myPick = predictions[selectedEvent.id]?.[match.id];
+                const myPickData = predictions[selectedEvent.id]?.[match.id];
+                // Handle both old format (string) and new format (object)
+                const myPick = typeof myPickData === 'string' ? myPickData : (myPickData?.winner || myPickData);
+                const myMethod = typeof myPickData === 'object' ? myPickData?.method : null;
                 const actualWinner = eventResults[selectedEvent.id]?.[match.id];
                 const isCorrect = actualWinner && myPick === actualWinner;
+                const sentiment = communitySentiment[selectedEvent.id]?.[match.id];
+                const matchKey = `${selectedEvent.id}-${match.id}`;
+                
                 return (
                   <div key={match.id} className="relative group">
                     <div className="text-center mb-2"><span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-slate-900 px-3 py-1 rounded-full border border-slate-800">{match.title}</span></div>
+                    
+                    {/* Community Sentiment Bar */}
+                    {sentiment && sentiment.total > 0 && !actualWinner && (
+                      <div className="mb-3 px-2">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[9px] text-slate-500 font-bold uppercase">Community Pick %</span>
+                          <span className="text-[9px] text-slate-600">({sentiment.total} picks)</span>
+                        </div>
+                        <div className="flex h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                          <div 
+                            className="bg-blue-600 transition-all duration-500" 
+                            style={{ width: `${sentiment.p1}%` }}
+                            title={`${sentiment.p1}% picked ${match.p1}`}
+                          ></div>
+                          <div 
+                            className="bg-purple-600 transition-all duration-500" 
+                            style={{ width: `${sentiment.p2}%` }}
+                            title={`${sentiment.p2}% picked ${match.p2}`}
+                          ></div>
+                        </div>
+                        <div className="flex justify-between text-[9px] text-slate-500 mt-1">
+                          <span>{sentiment.p1}% {match.p1.split(' ')[0]}</span>
+                          <span>{sentiment.p2}% {match.p2.split(' ')[0]}</span>
+                        </div>
+                      </div>
+                    )}
+                    
                     <div className="flex gap-1 h-64"> 
-                      <div onClick={() => !actualWinner && makePrediction(selectedEvent.id, match.id, match.p1)} className={`flex-1 relative rounded-l-2xl overflow-hidden cursor-pointer transition-all duration-300 border-y border-l ${myPick === match.p1 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800 hover:border-slate-600'} ${actualWinner && actualWinner !== match.p1 ? 'grayscale opacity-50' : ''}`}>
-                         <WrestlerImage name={match.p1} className="w-full h-full" imageUrl={match.p1Image} /><div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent pt-12 pb-3 px-2 text-center"><span className={`block font-black text-lg uppercase leading-none ${myPick === match.p1 ? 'text-red-500' : 'text-white'}`}>{match.p1}</span>{myPick === match.p1 && <span className="text-[8px] font-bold bg-red-600 text-white px-2 py-0.5 rounded-full inline-block mt-1">YOUR PICK</span>}</div>{actualWinner === match.p1 && <div className="absolute top-2 left-2 bg-green-500 text-black text-[10px] font-black px-2 py-1 rounded uppercase shadow-lg z-20">Winner</div>}
+                      <div onClick={() => !actualWinner && makePrediction(selectedEvent.id, match.id, match.p1, selectedMethod[matchKey] || 'pinfall')} className={`flex-1 relative rounded-l-2xl overflow-hidden cursor-pointer transition-all duration-300 border-y border-l ${myPick === match.p1 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800 hover:border-slate-600'} ${actualWinner && actualWinner !== match.p1 ? 'grayscale opacity-50' : ''}`}>
+                         <WrestlerImage name={match.p1} className="w-full h-full" imageUrl={match.p1Image} />
+                         <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent pt-12 pb-3 px-2 text-center">
+                           <span className={`block font-black text-lg uppercase leading-none ${myPick === match.p1 ? 'text-red-500' : 'text-white'}`}>{match.p1}</span>
+                           {myPick === match.p1 && <span className="text-[8px] font-bold bg-red-600 text-white px-2 py-0.5 rounded-full inline-block mt-1">YOUR PICK</span>}
+                           {sentiment && sentiment.p1 > 50 && <div className="text-[8px] text-blue-400 font-bold mt-1">🔥 {sentiment.p1}% FAVORITE</div>}
+                         </div>
+                         {actualWinner === match.p1 && <div className="absolute top-2 left-2 bg-green-500 text-black text-[10px] font-black px-2 py-1 rounded uppercase shadow-lg z-20">Winner</div>}
                       </div>
                       <div className="w-1 bg-slate-900 flex items-center justify-center relative z-20"><div className="absolute bg-slate-950 border border-slate-700 rounded-full w-8 h-8 flex items-center justify-center text-[10px] font-black text-slate-500 italic shadow-xl">VS</div></div>
-                      <div onClick={() => !actualWinner && makePrediction(selectedEvent.id, match.id, match.p2)} className={`flex-1 relative rounded-r-2xl overflow-hidden cursor-pointer transition-all duration-300 border-y border-r ${myPick === match.p2 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800 hover:border-slate-600'} ${actualWinner && actualWinner !== match.p2 ? 'grayscale opacity-50' : ''}`}>
-                         <WrestlerImage name={match.p2} className="w-full h-full" imageUrl={match.p2Image} /><div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent pt-12 pb-3 px-2 text-center"><span className={`block font-black text-lg uppercase leading-none ${myPick === match.p2 ? 'text-red-500' : 'text-white'}`}>{match.p2}</span>{myPick === match.p2 && <span className="text-[8px] font-bold bg-red-600 text-white px-2 py-0.5 rounded-full inline-block mt-1">YOUR PICK</span>}</div>{actualWinner === match.p2 && <div className="absolute top-2 right-2 bg-green-500 text-black text-[10px] font-black px-2 py-1 rounded uppercase shadow-lg z-20">Winner</div>}
+                      <div onClick={() => !actualWinner && makePrediction(selectedEvent.id, match.id, match.p2, selectedMethod[matchKey] || 'pinfall')} className={`flex-1 relative rounded-r-2xl overflow-hidden cursor-pointer transition-all duration-300 border-y border-r ${myPick === match.p2 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800 hover:border-slate-600'} ${actualWinner && actualWinner !== match.p2 ? 'grayscale opacity-50' : ''}`}>
+                         <WrestlerImage name={match.p2} className="w-full h-full" imageUrl={match.p2Image} />
+                         <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent pt-12 pb-3 px-2 text-center">
+                           <span className={`block font-black text-lg uppercase leading-none ${myPick === match.p2 ? 'text-red-500' : 'text-white'}`}>{match.p2}</span>
+                           {myPick === match.p2 && <span className="text-[8px] font-bold bg-red-600 text-white px-2 py-0.5 rounded-full inline-block mt-1">YOUR PICK</span>}
+                           {sentiment && sentiment.p2 > 50 && <div className="text-[8px] text-purple-400 font-bold mt-1">🔥 {sentiment.p2}% FAVORITE</div>}
+                         </div>
+                         {actualWinner === match.p2 && <div className="absolute top-2 right-2 bg-green-500 text-black text-[10px] font-black px-2 py-1 rounded uppercase shadow-lg z-20">Winner</div>}
                       </div>
                     </div>
-                    {actualWinner && <div className={`mt-2 text-center text-xs font-bold uppercase tracking-wider p-2 rounded-lg border ${isCorrect ? 'bg-green-900/20 border-green-900 text-green-400' : 'bg-red-900/20 border-red-900 text-red-400'}`}>{isCorrect ? '+10 POINTS' : 'INCORRECT'}</div>}
+                    
+                    {/* Method of Victory Selector */}
+                    {myPick && !actualWinner && (
+                      <div className="mt-3 px-2">
+                        <label className="block text-[10px] text-slate-500 font-bold uppercase mb-2">Method of Victory</label>
+                        <select
+                          value={selectedMethod[matchKey] || myMethod || 'pinfall'}
+                          onChange={(e) => {
+                            setSelectedMethod(prev => ({ ...prev, [matchKey]: e.target.value }));
+                            makePrediction(selectedEvent.id, match.id, myPick, e.target.value);
+                          }}
+                          className="w-full bg-slate-900 border border-slate-800 text-white px-3 py-2 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
+                        >
+                          <option value="pinfall">Pinfall</option>
+                          <option value="submission">Submission</option>
+                          <option value="dq">DQ / Count-out</option>
+                          <option value="no-contest">No Contest</option>
+                        </select>
+                        {myMethod && (
+                          <div className="mt-1 text-[9px] text-slate-400">
+                            Your pick: <span className="font-bold text-slate-300 capitalize">{myMethod}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
+                    {actualWinner && (
+                      <div className={`mt-2 text-center text-xs font-bold uppercase tracking-wider p-2 rounded-lg border ${isCorrect ? 'bg-green-900/20 border-green-900 text-green-400' : 'bg-red-900/20 border-red-900 text-red-400'}`}>
+                        {isCorrect ? '+10 POINTS' : 'INCORRECT'}
+                      </div>
+                    )}
                   </div>
                 );
               })}
