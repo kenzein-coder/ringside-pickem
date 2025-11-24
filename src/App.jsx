@@ -263,6 +263,7 @@ export default function RingsidePickemFinal() {
   const [scrapedEvents, setScrapedEvents] = useState([]); // Events from Firestore scraper
   const [communitySentiment, setCommunitySentiment] = useState({}); // { eventId: { matchId: { p1: 65, p2: 35 } } }
   const [selectedMethod, setSelectedMethod] = useState({}); // { eventId-matchId: 'pinfall' }
+  const [predictionsUserId, setPredictionsUserId] = useState(null); // Track which user's predictions we're showing
 
   // --- AUTH & INIT ---
   useEffect(() => {
@@ -275,6 +276,7 @@ export default function RingsidePickemFinal() {
       setUserProfile(null);
       setCommunitySentiment({});
       setSelectedMethod({});
+      setPredictionsUserId(null); // Clear the user ID tracker
       
       setUser(currentUser);
       
@@ -320,6 +322,7 @@ export default function RingsidePickemFinal() {
       setPredictions({});
       setCommunitySentiment({});
       setSelectedMethod({});
+      setPredictionsUserId(null);
       return;
     }
 
@@ -327,6 +330,7 @@ export default function RingsidePickemFinal() {
     setPredictions({});
     setCommunitySentiment({});
     setSelectedMethod({});
+    setPredictionsUserId(null);
 
     const unsubProfile = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), (snap) => {
         if(snap.exists()) {
@@ -338,38 +342,49 @@ export default function RingsidePickemFinal() {
     });
 
     // Set up predictions listener for THIS specific user
-    // Capture user.uid in closure to ensure we're using the correct user
+    // CRITICAL: Capture user.uid at setup time to avoid closure issues
     const currentUserId = user.uid;
-    console.log('Setting up predictions listener for user:', currentUserId);
+    const predictionsPath = `artifacts/${appId}/users/${currentUserId}/predictions`;
+    console.log('🔔 Setting up predictions listener for user:', currentUserId);
+    console.log('📂 Listening to path:', predictionsPath);
+    
+    // Mark that we're now listening to this user's predictions
+    setPredictionsUserId(currentUserId);
     
     const unsubPreds = onSnapshot(
       collection(db, 'artifacts', appId, 'users', currentUserId, 'predictions'), 
       (snap) => {
-        // Double-check we're still listening to the correct user
-        if (!user || user.uid !== currentUserId) {
-          console.log('User changed, ignoring predictions update. Current:', user?.uid, 'Listener:', currentUserId);
-          setPredictions({});
-          return;
-        }
-        
-        console.log('Predictions update for user:', currentUserId, 'Count:', snap.size);
-        
-        if (snap.empty) {
-          // Explicitly clear predictions if collection is empty
-          console.log('No predictions found, clearing state');
-          setPredictions({});
-        } else {
-          const preds = {}; 
-          snap.forEach(doc => { 
-            preds[doc.id] = doc.data();
-            console.log('Loaded prediction for event:', doc.id, 'Data:', doc.data());
-          }); 
-          setPredictions(preds);
-        }
+        // CRITICAL: Only process if this is still the current user
+        // Check against the state to ensure we haven't switched users
+        setPredictionsUserId(prevUserId => {
+          if (prevUserId !== currentUserId) {
+            console.log('⚠️  Ignoring predictions - user changed. Expected:', currentUserId, 'Current:', prevUserId);
+            return prevUserId; // Don't update
+          }
+          
+          console.log('📥 Predictions snapshot received for user:', currentUserId, 'Count:', snap.size);
+          
+          if (snap.empty) {
+            // Explicitly clear predictions if collection is empty
+            console.log('✅ No predictions found, clearing state');
+            setPredictions({});
+          } else {
+            const preds = {}; 
+            snap.forEach(doc => { 
+              preds[doc.id] = doc.data();
+              console.log('📋 Loaded prediction for event:', doc.id);
+            }); 
+            console.log('💾 Setting predictions state for user:', currentUserId, 'Events:', Object.keys(preds));
+            setPredictions(preds);
+          }
+          
+          return currentUserId; // Keep tracking this user
+        });
       },
       (error) => {
-        console.error('Error listening to predictions:', error);
+        console.error('❌ Error listening to predictions:', error);
         setPredictions({});
+        setPredictionsUserId(null);
       }
     );
     
@@ -437,6 +452,7 @@ export default function RingsidePickemFinal() {
     });
 
     return () => {
+      console.log('🧹 Cleaning up listeners for user:', user?.uid);
       // Clean up all listeners when user changes or component unmounts
       unsubProfile(); 
       unsubPreds(); 
@@ -444,9 +460,11 @@ export default function RingsidePickemFinal() {
       unsubLb(); 
       unsubEvents();
       // Also clear state to prevent stale data
+      console.log('🗑️  Clearing predictions state on cleanup');
       setPredictions({});
       setCommunitySentiment({});
       setSelectedMethod({});
+      setPredictionsUserId(null);
     };
   }, [viewState, user?.uid]); // Re-run when user.uid changes
 
