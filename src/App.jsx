@@ -267,9 +267,19 @@ export default function RingsidePickemFinal() {
   // --- AUTH & INIT ---
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      console.log('🔐 Auth state changed. New user:', currentUser?.uid || 'null');
+      
+      // CRITICAL: Clear all user data IMMEDIATELY when auth state changes
+      // This prevents showing data from the previous user
+      setPredictions({});
+      setUserProfile(null);
+      setCommunitySentiment({});
+      setSelectedMethod({});
+      
       setUser(currentUser);
       
       if (currentUser) {
+        console.log('✅ User logged in:', currentUser.uid);
         setUserId(currentUser.uid);
         setIsConnected(true);
         try {
@@ -283,22 +293,19 @@ export default function RingsidePickemFinal() {
             setUserProfile(data);
             setViewState('dashboard');
           } else {
+            console.log('📝 No profile found, going to onboarding');
             setViewState('onboarding');
             setOnboardingPage(1); 
           }
         } catch (e) {
-          console.error("Profile check error:", e);
+          console.error("❌ Profile check error:", e);
           setViewState('onboarding'); 
         }
       } else {
+        console.log('🚪 User logged out');
         setViewState('login');
         setUserId(null);
         setIsConnected(false);
-        // Clear user-specific data when logging out
-        setPredictions({});
-        setUserProfile(null);
-        setCommunitySentiment({});
-        setSelectedMethod({});
       }
       setAuthLoading(false);
       setIsLoggingIn(false);
