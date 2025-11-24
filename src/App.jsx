@@ -267,9 +267,6 @@ export default function RingsidePickemFinal() {
   
   // Use ref to track current user ID - this won't cause re-renders and is always current
   const currentUserIdRef = useRef(null);
-  
-  // Use ref to track current user ID - this won't cause re-renders and is always current
-  const currentUserIdRef = useRef(null);
 
   // --- AUTH & INIT ---
   useEffect(() => {
