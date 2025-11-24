@@ -351,15 +351,24 @@ export default function RingsidePickemFinal() {
     // Mark that we're now listening to this user's predictions
     setPredictionsUserId(currentUserId);
     
+    // Use a ref-like pattern with a flag to track if this listener is still valid
+    let isListenerValid = true;
+    
     const unsubPreds = onSnapshot(
       collection(db, 'artifacts', appId, 'users', currentUserId, 'predictions'), 
       (snap) => {
-        // CRITICAL: Only process if this is still the current user
-        // Check against the state to ensure we haven't switched users
+        // CRITICAL: Only process if this listener is still valid (user hasn't changed)
+        if (!isListenerValid) {
+          console.log('⚠️  Ignoring predictions - listener invalidated (user changed)');
+          return;
+        }
+        
+        // Double-check the current user matches
         setPredictionsUserId(prevUserId => {
           if (prevUserId !== currentUserId) {
             console.log('⚠️  Ignoring predictions - user changed. Expected:', currentUserId, 'Current:', prevUserId);
-            return prevUserId; // Don't update
+            isListenerValid = false;
+            return prevUserId;
           }
           
           console.log('📥 Predictions snapshot received for user:', currentUserId, 'Count:', snap.size);
@@ -378,15 +387,24 @@ export default function RingsidePickemFinal() {
             setPredictions(preds);
           }
           
-          return currentUserId; // Keep tracking this user
+          return currentUserId;
         });
       },
       (error) => {
         console.error('❌ Error listening to predictions:', error);
-        setPredictions({});
-        setPredictionsUserId(null);
+        if (isListenerValid) {
+          setPredictions({});
+          setPredictionsUserId(null);
+        }
       }
     );
+    
+    // Return cleanup that marks listener as invalid
+    const originalCleanup = unsubPreds;
+    const enhancedCleanup = () => {
+      isListenerValid = false;
+      originalCleanup();
+    };
     
     // FIXED: Use 6 segment path for document listener: artifacts/appId/public/data/scores/global
     const unsubResults = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'scores', 'global'), (snap) => {
@@ -455,7 +473,11 @@ export default function RingsidePickemFinal() {
       console.log('🧹 Cleaning up listeners for user:', user?.uid);
       // Clean up all listeners when user changes or component unmounts
       unsubProfile(); 
-      unsubPreds(); 
+      if (typeof cleanupPredictions === 'function') {
+        cleanupPredictions();
+      } else {
+        unsubPreds();
+      }
       unsubResults(); 
       unsubLb(); 
       unsubEvents();
