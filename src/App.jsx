@@ -331,6 +331,8 @@ export default function RingsidePickemFinal() {
     }
 
     // CRITICAL: Clear predictions immediately when user changes to prevent showing old data
+    console.log('🧹 Clearing predictions state before setting up new listener');
+    console.log('🧹 Current predictions state before clear:', JSON.stringify(predictions));
     setPredictions({});
     setCommunitySentiment({});
     setSelectedMethod({});
