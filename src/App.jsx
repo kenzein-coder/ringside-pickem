@@ -730,18 +730,30 @@ export default function RingsidePickemFinal() {
     
     try {
       // Get all user predictions for this event
-      const usersRef = collection(db, 'artifacts', appId, 'users');
+      // Users are stored at: artifacts/{appId}/public/data/users/{userId}
+      // Predictions are stored at: artifacts/{appId}/users/{userId}/predictions/{eventId}
+      const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'users');
       const usersSnapshot = await getDocs(usersRef);
       
       const matchCounts = {};
       
       const promises = [];
       usersSnapshot.forEach(userDoc => {
+        // Predictions path: artifacts/{appId}/users/{userId}/predictions/{eventId}
         const userPredictionsRef = doc(db, 'artifacts', appId, 'users', userDoc.id, 'predictions', eventId);
         promises.push(getDoc(userPredictionsRef));
       });
       
       const predDocs = await Promise.all(promises);
+      
+      // Get event data for match info
+      const event = scrapedEvents.find(e => e.id === eventId) || 
+                    INITIAL_EVENTS.find(e => e.id === eventId);
+      
+      if (!event) {
+        console.log('Event not found for sentiment calculation:', eventId);
+        return;
+      }
       
       predDocs.forEach(predDoc => {
         if (predDoc.exists()) {
@@ -749,23 +761,19 @@ export default function RingsidePickemFinal() {
           Object.keys(preds).forEach(matchId => {
             const pred = preds[matchId];
             // Handle both old format (string) and new format (object)
-            const winner = typeof pred === 'string' ? pred : (pred.winner || pred);
+            const winner = typeof pred === 'string' ? pred : (pred?.winner || pred);
             
             if (!matchCounts[matchId]) {
               matchCounts[matchId] = { p1: 0, p2: 0 };
             }
             
             // Get match info to determine p1 vs p2
-            const event = scrapedEvents.find(e => e.id === eventId) || 
-                        INITIAL_EVENTS.find(e => e.id === eventId);
-            if (event) {
-              const match = event.matches.find(m => m.id.toString() === matchId.toString());
-              if (match) {
-                if (winner === match.p1) {
-                  matchCounts[matchId].p1++;
-                } else if (winner === match.p2) {
-                  matchCounts[matchId].p2++;
-                }
+            const match = event.matches.find(m => m.id.toString() === matchId.toString());
+            if (match) {
+              if (winner === match.p1) {
+                matchCounts[matchId].p1++;
+              } else if (winner === match.p2) {
+                matchCounts[matchId].p2++;
               }
             }
           });
@@ -785,6 +793,8 @@ export default function RingsidePickemFinal() {
           };
         }
       });
+      
+      console.log('Community sentiment calculated:', sentiment);
       
       setCommunitySentiment(prev => ({
         ...prev,
