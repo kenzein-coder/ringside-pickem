@@ -36,3 +36,6 @@ build
 # Test data files
 data/
 *.html
+
+# Firebase Admin SDK service account key (contains sensitive credentials)
+serviceAccountKey.json
