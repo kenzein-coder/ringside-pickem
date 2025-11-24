@@ -399,11 +399,10 @@ export default function RingsidePickemFinal() {
       }
     );
     
-    // Return cleanup that marks listener as invalid
-    const originalCleanup = unsubPreds;
-    const enhancedCleanup = () => {
+    // Wrap cleanup to mark listener as invalid
+    const cleanupPredictions = () => {
       isListenerValid = false;
-      originalCleanup();
+      unsubPreds();
     };
     
     // FIXED: Use 6 segment path for document listener: artifacts/appId/public/data/scores/global
