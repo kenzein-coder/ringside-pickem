@@ -39,3 +39,10 @@ data/
 
 # Firebase Admin SDK service account key (contains sensitive credentials)
 serviceAccountKey.json
+
+# Documentation files that might contain secrets
+*env-setup*.md
+*setup*.md
+*config*.md
+*secrets*.md
+*credentials*.md
