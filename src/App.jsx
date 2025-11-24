@@ -355,25 +355,36 @@ export default function RingsidePickemFinal() {
     console.log('🔔 Setting up predictions listener for user:', currentUserId);
     console.log('📂 Listening to path:', predictionsPath);
     
+    // Update ref immediately - this is always current
+    currentUserIdRef.current = currentUserId;
+    
     // Mark that we're now listening to this user's predictions
     setPredictionsUserId(currentUserId);
     
-    // Use a ref-like pattern with a flag to track if this listener is still valid
+    // Use a flag to track if this listener is still valid
     let isListenerValid = true;
     
     const unsubPreds = onSnapshot(
       collection(db, 'artifacts', appId, 'users', currentUserId, 'predictions'), 
       (snap) => {
-        // CRITICAL: Only process if this listener is still valid (user hasn't changed)
-        if (!isListenerValid) {
-          console.log('⚠️  Ignoring predictions - listener invalidated (user changed)');
+        // CRITICAL: Check ref first - this is always the most current user ID
+        const refUserId = currentUserIdRef.current;
+        if (refUserId !== currentUserId) {
+          console.log('⚠️  Ignoring predictions - user changed in ref. Expected:', currentUserId, 'Current ref:', refUserId);
+          isListenerValid = false;
           return;
         }
         
-        // Double-check the current user matches
+        // Also check if listener is still valid
+        if (!isListenerValid) {
+          console.log('⚠️  Ignoring predictions - listener invalidated');
+          return;
+        }
+        
+        // Final check against state
         setPredictionsUserId(prevUserId => {
-          if (prevUserId !== currentUserId) {
-            console.log('⚠️  Ignoring predictions - user changed. Expected:', currentUserId, 'Current:', prevUserId);
+          if (prevUserId !== currentUserId && prevUserId !== null) {
+            console.log('⚠️  Ignoring predictions - user changed in state. Expected:', currentUserId, 'Current state:', prevUserId);
             isListenerValid = false;
             return prevUserId;
           }
@@ -408,6 +419,7 @@ export default function RingsidePickemFinal() {
     
     // Wrap cleanup to mark listener as invalid
     const cleanupPredictions = () => {
+      console.log('🛑 Invalidating predictions listener for user:', currentUserId);
       isListenerValid = false;
       unsubPreds();
     };
