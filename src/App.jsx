@@ -336,9 +336,13 @@ export default function RingsidePickemFinal() {
     // CRITICAL: Clear predictions immediately when user changes to prevent showing old data
     console.log('🧹 Clearing predictions state before setting up new listener');
     console.log('🧹 Current predictions state before clear:', JSON.stringify(predictions));
-    setPredictions({});
-    setCommunitySentiment({});
-    setSelectedMethod({});
+    console.log('🧹 Current user:', user?.uid);
+    console.log('🧹 Current predictionsUserId:', predictionsUserId);
+    
+    // Force clear - use functional update to ensure we get the latest state
+    setPredictions(() => ({}));
+    setCommunitySentiment(() => ({}));
+    setSelectedMethod(() => ({}));
     setPredictionsUserId(null);
 
     const unsubProfile = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), (snap) => {
@@ -1492,20 +1496,30 @@ export default function RingsidePickemFinal() {
               {selectedEvent.matches.map((match) => {
                 // CRITICAL: Only show predictions if they belong to the current user
                 // Must be exact match - null means we haven't loaded predictions yet, so don't show any
-                const predictionsBelongToCurrentUser = predictionsUserId === user?.uid && predictionsUserId !== null;
+                const predictionsBelongToCurrentUser = predictionsUserId === user?.uid && predictionsUserId !== null && user?.uid !== null;
                 
-                // Log what we're seeing
-                if (predictions[selectedEvent.id]?.[match.id] && !predictionsBelongToCurrentUser) {
-                  console.warn('⚠️  Found predictions that do not belong to current user!', {
+                // Log what we're seeing for debugging
+                if (predictions[selectedEvent.id]?.[match.id]) {
+                  console.log('🔍 Checking prediction:', {
+                    hasPrediction: !!predictions[selectedEvent.id]?.[match.id],
                     predictionsUserId,
                     currentUserId: user?.uid,
+                    belongsToUser: predictionsBelongToCurrentUser,
                     eventId: selectedEvent.id,
-                    matchId: match.id,
-                    predictionData: predictions[selectedEvent.id]?.[match.id]
+                    matchId: match.id
                   });
+                  
+                  if (!predictionsBelongToCurrentUser) {
+                    console.warn('⚠️  BLOCKING prediction display - does not belong to current user!', {
+                      predictionsUserId,
+                      currentUserId: user?.uid,
+                      eventId: selectedEvent.id,
+                      matchId: match.id
+                    });
+                  }
                 }
                 
-                // Only use predictions if they belong to current user
+                // Only use predictions if they belong to current user - otherwise force undefined
                 const myPickData = predictionsBelongToCurrentUser ? (predictions[selectedEvent.id]?.[match.id]) : undefined;
                 // Handle both old format (string) and new format (object)
                 const myPick = myPickData ? (typeof myPickData === 'string' ? myPickData : (myPickData?.winner || myPickData)) : undefined;
