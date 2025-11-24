@@ -222,6 +222,7 @@ export default function RingsidePickemFinal() {
   const [eventResults, setEventResults] = useState({});
   const [isConnected, setIsConnected] = useState(false);
   const [userId, setUserId] = useState(null);
+  const [scrapedEvents, setScrapedEvents] = useState([]); // Events from Firestore scraper
 
   // --- AUTH & INIT ---
   useEffect(() => {
@@ -294,8 +295,38 @@ export default function RingsidePickemFinal() {
       setLeaderboard(lb);
     });
 
+    // Listen to events from Firestore (scraped data)
+    const eventsQuery = query(
+      collection(db, 'artifacts', appId, 'public', 'data', 'events'),
+      orderBy('date', 'desc'),
+      limit(50)
+    );
+    const unsubEvents = onSnapshot(eventsQuery, (snap) => {
+      const events = [];
+      snap.forEach(d => {
+        const data = d.data();
+        // Map Firestore data structure to app's expected structure
+        events.push({
+          id: d.id,
+          promoId: data.promotionId === '1' ? 'wwe' : 
+                   data.promotionId === '2287' ? 'aew' :
+                   data.promotionId === '7' ? 'njpw' :
+                   data.promotionId === '5' ? 'tna' :
+                   data.promotionId === '122' ? 'roh' : data.promotionId,
+          name: data.name,
+          date: data.date,
+          venue: data.venue || data.location,
+          matches: data.matches || [],
+          // Keep original data for reference
+          promotionId: data.promotionId,
+          promotionName: data.promotionName
+        });
+      });
+      setScrapedEvents(events);
+    });
+
     return () => {
-      unsubProfile(); unsubPreds(); unsubResults(); unsubLb();
+      unsubProfile(); unsubPreds(); unsubResults(); unsubLb(); unsubEvents();
     };
   }, [viewState, user]);
 
@@ -426,8 +457,19 @@ export default function RingsidePickemFinal() {
   const myEvents = useMemo(() => {
     // CRITICAL: Safety check for subscriptions array
     const subs = userProfile?.subscriptions || [];
-    return INITIAL_EVENTS.filter(ev => subs.includes(ev.promoId));
-  }, [userProfile]);
+    
+    // Use scraped events from Firestore if available, otherwise fall back to INITIAL_EVENTS
+    const eventsToUse = scrapedEvents.length > 0 ? scrapedEvents : INITIAL_EVENTS;
+    
+    return eventsToUse.filter(ev => {
+      // Match by promoId (wwe, aew, etc.) or by promotionId (1, 2287, etc.)
+      return subs.includes(ev.promoId) || 
+             (ev.promotionId && subs.some(sub => {
+               const promoMap = { 'wwe': '1', 'aew': '2287', 'njpw': '7', 'tna': '5', 'roh': '122' };
+               return promoMap[sub] === ev.promotionId;
+             }));
+    });
+  }, [userProfile, scrapedEvents]);
 
   // --- VIEW: LOADING ---
   if (authLoading || viewState === 'loading') {
