@@ -1326,28 +1326,36 @@ export default function RingsidePickemFinal() {
                     <div className="text-center mb-2"><span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-slate-900 px-3 py-1 rounded-full border border-slate-800">{match.title}</span></div>
                     
                     {/* Community Sentiment Bar */}
-                    {sentiment && sentiment.total > 0 && !actualWinner && (
+                    {!actualWinner && (
                       <div className="mb-3 px-2">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-[9px] text-slate-500 font-bold uppercase">Community Pick %</span>
-                          <span className="text-[9px] text-slate-600">({sentiment.total} picks)</span>
-                        </div>
-                        <div className="flex h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
-                          <div 
-                            className="bg-blue-600 transition-all duration-500" 
-                            style={{ width: `${sentiment.p1}%` }}
-                            title={`${sentiment.p1}% picked ${match.p1}`}
-                          ></div>
-                          <div 
-                            className="bg-purple-600 transition-all duration-500" 
-                            style={{ width: `${sentiment.p2}%` }}
-                            title={`${sentiment.p2}% picked ${match.p2}`}
-                          ></div>
-                        </div>
-                        <div className="flex justify-between text-[9px] text-slate-500 mt-1">
-                          <span>{sentiment.p1}% {match.p1.split(' ')[0]}</span>
-                          <span>{sentiment.p2}% {match.p2.split(' ')[0]}</span>
-                        </div>
+                        {sentiment && sentiment.total > 0 ? (
+                          <>
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-[9px] text-slate-500 font-bold uppercase">Community Pick %</span>
+                              <span className="text-[9px] text-slate-600">({sentiment.total} picks)</span>
+                            </div>
+                            <div className="flex h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                              <div 
+                                className="bg-blue-600 transition-all duration-500" 
+                                style={{ width: `${sentiment.p1}%` }}
+                                title={`${sentiment.p1}% picked ${match.p1}`}
+                              ></div>
+                              <div 
+                                className="bg-purple-600 transition-all duration-500" 
+                                style={{ width: `${sentiment.p2}%` }}
+                                title={`${sentiment.p2}% picked ${match.p2}`}
+                              ></div>
+                            </div>
+                            <div className="flex justify-between text-[9px] text-slate-500 mt-1">
+                              <span>{sentiment.p1}% {match.p1.split(' ')[0]}</span>
+                              <span>{sentiment.p2}% {match.p2.split(' ')[0]}</span>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-center py-2">
+                            <span className="text-[9px] text-slate-600 font-medium">No community picks yet - be the first!</span>
+                          </div>
+                        )}
                       </div>
                     )}
                     
