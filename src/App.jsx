@@ -874,11 +874,20 @@ export default function RingsidePickemFinal() {
 
   const makePrediction = (eventId, matchId, winner, method = null) => {
     if (!user || !user.uid) {
-      console.error('Cannot make prediction: no user logged in');
+      console.error('❌ Cannot make prediction: no user logged in');
       return;
     }
     
-    console.log('Making prediction for user:', user.uid, 'Event:', eventId, 'Match:', matchId, 'Winner:', winner);
+    // CRITICAL: Verify this prediction belongs to the current user
+    if (predictionsUserId !== null && predictionsUserId !== user.uid) {
+      console.error('❌ BLOCKING prediction save - predictionsUserId does not match current user!', {
+        predictionsUserId,
+        currentUserId: user.uid
+      });
+      return;
+    }
+    
+    console.log('✅ Making prediction for user:', user.uid, 'Event:', eventId, 'Match:', matchId, 'Winner:', winner);
     
     const currentPreds = predictions[eventId] || {};
     // Support both old format (string) and new format (object with winner and method)
@@ -897,15 +906,16 @@ export default function RingsidePickemFinal() {
     console.log('🔍 App ID:', appId);
     console.log('🔍 Event ID:', eventId);
     console.log('🔍 Prediction data:', JSON.stringify(newPreds));
+    console.log('🔍 Current predictionsUserId:', predictionsUserId);
     
     setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'predictions', eventId), newPreds, { merge: true })
       .then(() => {
-        console.log('Prediction saved successfully');
+        console.log('✅ Prediction saved successfully to path:', predictionPath);
         // Recalculate community sentiment after making a prediction
         setTimeout(() => calculateCommunitySentiment(eventId), 1000);
       })
       .catch((error) => {
-        console.error('Error saving prediction:', error);
+        console.error('❌ Error saving prediction:', error);
       });
   };
 
