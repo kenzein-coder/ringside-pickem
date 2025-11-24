@@ -1485,10 +1485,26 @@ export default function RingsidePickemFinal() {
             </div>
             <div className="space-y-6">
               {selectedEvent.matches.map((match) => {
-                const myPickData = predictions[selectedEvent.id]?.[match.id];
+                // CRITICAL: Only show predictions if they belong to the current user
+                // Check if predictionsUserId matches current user
+                const predictionsBelongToCurrentUser = predictionsUserId === user?.uid || predictionsUserId === null;
+                
+                // Log what we're seeing
+                if (predictions[selectedEvent.id]?.[match.id] && !predictionsBelongToCurrentUser) {
+                  console.warn('⚠️  Found predictions that do not belong to current user!', {
+                    predictionsUserId,
+                    currentUserId: user?.uid,
+                    eventId: selectedEvent.id,
+                    matchId: match.id,
+                    predictionData: predictions[selectedEvent.id]?.[match.id]
+                  });
+                }
+                
+                // Only use predictions if they belong to current user
+                const myPickData = predictionsBelongToCurrentUser ? (predictions[selectedEvent.id]?.[match.id]) : undefined;
                 // Handle both old format (string) and new format (object)
-                const myPick = typeof myPickData === 'string' ? myPickData : (myPickData?.winner || myPickData);
-                const myMethod = typeof myPickData === 'object' ? myPickData?.method : null;
+                const myPick = myPickData ? (typeof myPickData === 'string' ? myPickData : (myPickData?.winner || myPickData)) : undefined;
+                const myMethod = myPickData && typeof myPickData === 'object' ? myPickData?.method : null;
                 const actualWinner = eventResults[selectedEvent.id]?.[match.id];
                 const isCorrect = actualWinner && myPick === actualWinner;
                 const sentiment = communitySentiment[selectedEvent.id]?.[match.id];
