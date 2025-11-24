@@ -275,6 +275,7 @@ export default function RingsidePickemFinal() {
       
       // CRITICAL: Clear all user data IMMEDIATELY when auth state changes
       // This prevents showing data from the previous user
+      console.log('🧹 Clearing all user data on auth state change');
       currentUserIdRef.current = null; // Clear ref first
       setPredictions({});
       setUserProfile(null);
@@ -286,6 +287,8 @@ export default function RingsidePickemFinal() {
       
       if (currentUser) {
         console.log('✅ User logged in:', currentUser.uid);
+        // Set ref immediately when user logs in
+        currentUserIdRef.current = currentUser.uid;
         setUserId(currentUser.uid);
         setIsConnected(true);
         try {
@@ -1488,8 +1491,8 @@ export default function RingsidePickemFinal() {
             <div className="space-y-6">
               {selectedEvent.matches.map((match) => {
                 // CRITICAL: Only show predictions if they belong to the current user
-                // Check if predictionsUserId matches current user
-                const predictionsBelongToCurrentUser = predictionsUserId === user?.uid || predictionsUserId === null;
+                // Must be exact match - null means we haven't loaded predictions yet, so don't show any
+                const predictionsBelongToCurrentUser = predictionsUserId === user?.uid && predictionsUserId !== null;
                 
                 // Log what we're seeing
                 if (predictions[selectedEvent.id]?.[match.id] && !predictionsBelongToCurrentUser) {
