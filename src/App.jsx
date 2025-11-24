@@ -176,17 +176,19 @@ const INITIAL_EVENTS = [
 
 const BrandLogo = ({ id, className = "w-full h-full object-contain", logoUrl }) => {
   const [error, setError] = useState(false);
-  // Use scraped logoUrl if available, otherwise fall back to hardcoded LOGO_URLS
-  const url = logoUrl || LOGO_URLS[id];
+  // Prioritize hardcoded LOGO_URLS over scraped logoUrl (Cagematch.net may have CORS issues)
+  // Only use scraped logoUrl if it's not from Cagematch.net
+  const url = (logoUrl && !logoUrl.includes('cagematch.net')) ? logoUrl : (LOGO_URLS[id] || logoUrl);
   useEffect(() => { setError(false); }, [id, logoUrl]);
   if (error || !url) return <div className={`w-full h-full flex items-center justify-center bg-slate-800 text-slate-400 font-black text-[10px] uppercase border border-slate-700 rounded tracking-tighter`}>{id.substring(0, 4)}</div>;
-  return <img src={url} alt={id} className={className} onError={() => setError(true)} referrerPolicy="no-referrer" loading="lazy" crossOrigin="anonymous" />;
+  return <img src={url} alt={id} className={className} onError={() => setError(true)} referrerPolicy="no-referrer" loading="lazy" />;
 };
 
 const WrestlerImage = ({ name, className, imageUrl }) => {
   const [error, setError] = useState(false);
   // Use scraped imageUrl if available, otherwise fall back to hardcoded WRESTLER_IMAGES
-  const url = imageUrl || WRESTLER_IMAGES[name];
+  // Note: Cagematch.net images may have CORS issues, so we prioritize hardcoded images
+  const url = imageUrl && !imageUrl.includes('cagematch.net') ? imageUrl : (WRESTLER_IMAGES[name] || imageUrl);
   useEffect(() => { setError(false); }, [name, imageUrl]);
   if (error || !url) {
     const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
@@ -197,7 +199,7 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
       </div>
     );
   }
-  return <img src={url} alt={name} className={`object-cover ${className}`} onError={() => setError(true)} referrerPolicy="no-referrer" loading="lazy" crossOrigin="anonymous" />;
+  return <img src={url} alt={name} className={`object-cover ${className}`} onError={() => setError(true)} referrerPolicy="no-referrer" loading="lazy" />;
 };
 
 const Toggle = ({ enabled, onClick }) => (
@@ -1129,7 +1131,7 @@ export default function RingsidePickemFinal() {
                 const isGraded = eventResults[event.id];
                 return (
                   <div key={event.id} onClick={() => { setSelectedEvent(event); setActiveTab('event'); }} className="group relative bg-slate-900 hover:bg-slate-800 border border-slate-800 transition-all cursor-pointer rounded-2xl overflow-hidden shadow-xl" style={{ height: '200px' }}>
-                    <div className="absolute inset-0"><img src={bgImage} alt="poster" className="w-full h-full object-cover opacity-60 group-hover:opacity-40 transition-opacity duration-500 group-hover:scale-105" referrerPolicy="no-referrer" crossOrigin="anonymous" /><div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/80 to-transparent"></div></div>
+                    <div className="absolute inset-0"><img src={bgImage} alt="poster" className="w-full h-full object-cover opacity-60 group-hover:opacity-40 transition-opacity duration-500 group-hover:scale-105" referrerPolicy="no-referrer" onError={(e) => { e.target.src = EVENT_BACKGROUNDS['wwe-survivor-2025']; }} /><div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/80 to-transparent"></div></div>
                     <div className="absolute inset-0 p-5 flex flex-col justify-end">
                       <div className="flex justify-between items-end">
                         <div className="flex-1">
@@ -1196,7 +1198,7 @@ export default function RingsidePickemFinal() {
           <div className="pb-24 animate-slideUp">
             <button onClick={() => setActiveTab('home')} className="mb-4 text-slate-500 hover:text-white flex items-center gap-1 text-xs font-bold uppercase tracking-wider">← Feed</button>
             <div className="mb-6 relative h-48 rounded-2xl overflow-hidden shadow-2xl border border-slate-800">
-              <img src={EVENT_BACKGROUNDS[selectedEvent.id] || EVENT_BACKGROUNDS['wwe-survivor-2025']} className="w-full h-full object-cover opacity-50" referrerPolicy="no-referrer" />
+              <img src={selectedEvent.bannerUrl || selectedEvent.posterUrl || EVENT_BACKGROUNDS[selectedEvent.id] || EVENT_BACKGROUNDS['wwe-survivor-2025']} className="w-full h-full object-cover opacity-50" referrerPolicy="no-referrer" onError={(e) => { e.target.src = EVENT_BACKGROUNDS['wwe-survivor-2025']; }} />
               <div className="absolute inset-0 bg-gradient-to-t from-slate-950 to-transparent"></div>
               <div className="absolute bottom-0 left-0 p-6 w-full text-center"><div className="inline-block w-16 h-16 p-2 bg-slate-950/50 backdrop-blur-md rounded-xl border border-slate-700 mb-2 shadow-lg"><BrandLogo id={selectedEvent.promoId} /></div><h1 className="text-3xl font-black italic uppercase text-white shadow-black drop-shadow-lg">{selectedEvent.name}</h1></div>
             </div>
