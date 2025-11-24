@@ -2,6 +2,11 @@
   "buildCommand": "npm install && npm run build",
   "outputDirectory": "dist",
   "installCommand": "npm install",
-  "framework": null
+  "framework": null,
+  "crons": [
+    {
+      "path": "/api/scrape-wrestling-data",
+      "schedule": "0 2 * * *"
+    }
+  ]
 }
-
