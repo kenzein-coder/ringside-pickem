@@ -308,11 +308,18 @@ export default function RingsidePickemFinal() {
 
   // --- DATA LISTENER ---
   useEffect(() => {
-    if (viewState !== 'dashboard' || !user) {
+    if (viewState !== 'dashboard' || !user || !user.uid) {
       // Clear predictions when not in dashboard or no user
       setPredictions({});
+      setCommunitySentiment({});
+      setSelectedMethod({});
       return;
     }
+
+    // CRITICAL: Clear predictions immediately when user changes to prevent showing old data
+    setPredictions({});
+    setCommunitySentiment({});
+    setSelectedMethod({});
 
     const unsubProfile = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), (snap) => {
         if(snap.exists()) {
@@ -323,21 +330,30 @@ export default function RingsidePickemFinal() {
         }
     });
 
-    // Clear predictions before loading new user's predictions to prevent showing old data
-    setPredictions({});
-    setCommunitySentiment({});
-    setSelectedMethod({});
-    
-    const unsubPreds = onSnapshot(collection(db, 'artifacts', appId, 'users', user.uid, 'predictions'), (snap) => {
-      if (snap.empty) {
-        // Explicitly clear predictions if collection is empty
+    // Set up predictions listener for THIS specific user
+    const unsubPreds = onSnapshot(
+      collection(db, 'artifacts', appId, 'users', user.uid, 'predictions'), 
+      (snap) => {
+        // Double-check we're still listening to the correct user
+        if (!user || !user.uid) {
+          setPredictions({});
+          return;
+        }
+        
+        if (snap.empty) {
+          // Explicitly clear predictions if collection is empty
+          setPredictions({});
+        } else {
+          const preds = {}; 
+          snap.forEach(doc => { preds[doc.id] = doc.data(); }); 
+          setPredictions(preds);
+        }
+      },
+      (error) => {
+        console.error('Error listening to predictions:', error);
         setPredictions({});
-      } else {
-        const preds = {}; 
-        snap.forEach(doc => { preds[doc.id] = doc.data(); }); 
-        setPredictions(preds);
       }
-    });
+    );
     
     // FIXED: Use 6 segment path for document listener: artifacts/appId/public/data/scores/global
     const unsubResults = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'scores', 'global'), (snap) => {
