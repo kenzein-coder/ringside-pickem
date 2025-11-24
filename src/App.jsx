@@ -62,11 +62,21 @@ const firebaseConfig = {
     messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
     appId: import.meta.env.VITE_FIREBASE_APP_ID
   };
+
+// Validate Firebase config
+if (!firebaseConfig.apiKey || firebaseConfig.apiKey.includes('...') || firebaseConfig.apiKey.length < 20) {
+  console.error('❌ Invalid Firebase API Key. Please check your .env file.');
+}
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const googleProvider = new GoogleAuthProvider();
+// Configure Google provider to always show account selection
+googleProvider.setCustomParameters({
+  prompt: 'select_account'
+});
 
 // --- ASSETS ---
 const WRESTLER_IMAGES = {
@@ -514,9 +524,22 @@ export default function RingsidePickemFinal() {
   const handleGoogleSignIn = async () => {
     setIsLoggingIn(true);
     setLoginError(null);
+    
+    // Set a timeout to prevent infinite loading
+    const loadingTimeout = setTimeout(() => {
+      setIsLoggingIn(false);
+      setLoginError("Sign-in is taking longer than expected. Please try again.");
+    }, 30000); // 30 second timeout
+    
     try {
       const result = await signInWithPopup(auth, googleProvider);
+      clearTimeout(loadingTimeout);
+      
       const user = result.user;
+      
+      if (!user) {
+        throw new Error("No user returned from Google sign-in");
+      }
       
       // Check if user profile exists, if not create one
       const profileRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid);
@@ -545,11 +568,19 @@ export default function RingsidePickemFinal() {
         if (!existingData.email && user.email) {
           await updateDoc(profileRef, { email: user.email });
         }
+        // Load existing profile
+        setUserProfile(existingData);
       }
       
-      // User profile will be loaded by the auth state listener
+      // The auth state listener will handle navigation
+      // Don't clear loading here - let onAuthStateChanged handle it
+      // This ensures the UI updates properly when auth state changes
+      
     } catch (error) {
+      clearTimeout(loadingTimeout);
       console.error("Google sign in error:", error);
+      setIsLoggingIn(false);
+      
       let errorMessage = "Failed to sign in with Google. ";
       if (error.code === 'auth/popup-closed-by-user') {
         errorMessage = "Sign-in popup was closed. Please try again.";
@@ -557,12 +588,12 @@ export default function RingsidePickemFinal() {
         errorMessage = "Popup was blocked. Please allow popups for this site.";
       } else if (error.code === 'auth/account-exists-with-different-credential') {
         errorMessage = "An account already exists with this email. Please sign in with your existing method.";
+      } else if (error.code === 'auth/cancelled-popup-request') {
+        errorMessage = "Sign-in was cancelled. Please try again.";
       } else {
         errorMessage += error.message || "Please try again.";
       }
       setLoginError(errorMessage);
-    } finally {
-      setIsLoggingIn(false);
     }
   };
 
