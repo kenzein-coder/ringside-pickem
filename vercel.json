@@ -3,6 +3,7 @@
   "outputDirectory": "dist",
   "installCommand": "npm install",
   "framework": null,
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD ./",
   "crons": [
     {
       "path": "/api/scrape-wrestling-data",
