@@ -46,12 +46,12 @@ import {
 
 // --- Firebase Configuration ---
 const firebaseConfig = {
-    apiKey: "AIzaSyD...",
-    authDomain: "ringside-pickem.firebaseapp.com",
-    projectId: "ringside-pickem",
-    storageBucket: "...",
-    messagingSenderId: "...",
-    appId: "..."
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyD...",
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "ringside-pickem.firebaseapp.com",
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "ringside-pickem",
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "...",
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "...",
+    appId: import.meta.env.VITE_FIREBASE_APP_ID || "..."
   };
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -311,7 +311,14 @@ export default function RingsidePickemFinal() {
              await signInAnonymously(auth);
           }
       } catch (error) {
-          setLoginError("Connection failed. Please try again.");
+          console.error("Firebase auth error:", error);
+          const errorMessage = error.code === 'auth/configuration-not-found' || 
+                              error.message?.includes('API key') ||
+                              firebaseConfig.apiKey?.includes('...') ||
+                              firebaseConfig.appId === "..."
+            ? "Firebase not configured. Please set up your .env file with Firebase credentials. See FIREBASE_SETUP.md"
+            : error.message || "Connection failed. Please try again.";
+          setLoginError(errorMessage);
           setIsLoggingIn(false);
       }
   };
@@ -349,7 +356,11 @@ export default function RingsidePickemFinal() {
         setViewState('dashboard');
     } catch (error) {
         console.error("Save error", error);
-        setLoginError("Failed to save profile.");
+        const errorMsg = error.code === 'permission-denied' 
+          ? "Firestore permission denied. Please check security rules in Firebase Console."
+          : error.message || "Failed to save profile.";
+        setLoginError(errorMsg);
+        alert(`Error: ${errorMsg}\n\nCheck browser console for details.`);
     } finally {
         setIsSubmitting(false);
     }
@@ -486,6 +497,11 @@ export default function RingsidePickemFinal() {
                  <button onClick={() => setOnboardingPage(1)} className="text-slate-500 hover:text-white text-xs font-bold uppercase mb-4">← Back</button>
                  <h1 className="text-2xl font-black text-white italic uppercase mb-2">Your Territory</h1>
                  <p className="text-slate-400 text-sm">Select promotions to follow.</p>
+                 {loginError && (
+                   <div className="mt-4 bg-red-900/30 text-red-400 p-3 rounded-lg text-xs border border-red-900/50">
+                     {loginError}
+                   </div>
+                 )}
                </div>
                <div className="flex-1 overflow-y-auto space-y-3 mb-6 pr-2 scrollbar-hide">
                   {PROMOTIONS.map(p => {
