@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
   getAuth, 
@@ -264,6 +264,9 @@ export default function RingsidePickemFinal() {
   const [communitySentiment, setCommunitySentiment] = useState({}); // { eventId: { matchId: { p1: 65, p2: 35 } } }
   const [selectedMethod, setSelectedMethod] = useState({}); // { eventId-matchId: 'pinfall' }
   const [predictionsUserId, setPredictionsUserId] = useState(null); // Track which user's predictions we're showing
+  
+  // Use ref to track current user ID - this won't cause re-renders and is always current
+  const currentUserIdRef = useRef(null);
 
   // --- AUTH & INIT ---
   useEffect(() => {
@@ -272,6 +275,7 @@ export default function RingsidePickemFinal() {
       
       // CRITICAL: Clear all user data IMMEDIATELY when auth state changes
       // This prevents showing data from the previous user
+      currentUserIdRef.current = null; // Clear ref first
       setPredictions({});
       setUserProfile(null);
       setCommunitySentiment({});
