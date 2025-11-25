@@ -1795,9 +1795,18 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                     
                     <div className="flex gap-1 h-64"> 
                       <div onClick={() => !actualWinner && makePrediction(selectedEvent.id, match.id, match.p1, selectedMethod[matchKey] || 'pinfall')} className={`flex-1 relative rounded-l-2xl overflow-hidden cursor-pointer transition-all duration-300 border-y border-l ${myPick === match.p1 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800 hover:border-slate-600'} ${actualWinner && actualWinner !== match.p1 ? 'grayscale opacity-50' : ''}`}>
-                         <WrestlerImage name={match.p1} className="w-full h-full" imageUrl={match.p1Image} />
+                         {/* Show grid of images for tag teams */}
+                         {match.p1Members && match.p1Members.length > 1 ? (
+                           <div className="w-full h-full grid grid-cols-2 gap-0.5">
+                             {match.p1Members.slice(0, 4).map((member, idx) => (
+                               <WrestlerImage key={idx} name={member.name} className="w-full h-full" imageUrl={member.image} />
+                             ))}
+                           </div>
+                         ) : (
+                           <WrestlerImage name={match.p1} className="w-full h-full" imageUrl={match.p1Image} />
+                         )}
                          <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent pt-12 pb-3 px-2 text-center">
-                           <span className={`block font-black text-lg uppercase leading-none ${myPick === match.p1 ? 'text-red-500' : 'text-white'}`}>{match.p1}</span>
+                           <span className={`block font-black ${match.p1.length > 20 ? 'text-sm' : 'text-lg'} uppercase leading-tight ${myPick === match.p1 ? 'text-red-500' : 'text-white'}`}>{match.p1}</span>
                            {myPick === match.p1 && <span className="text-[8px] font-bold bg-red-600 text-white px-2 py-0.5 rounded-full inline-block mt-1">YOUR PICK</span>}
                            {sentiment && sentiment.p1 > 50 && <div className="text-[8px] text-blue-400 font-bold mt-1">🔥 {sentiment.p1}% FAVORITE</div>}
                          </div>
@@ -1805,9 +1814,18 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                       </div>
                       <div className="w-1 bg-slate-900 flex items-center justify-center relative z-20"><div className="absolute bg-slate-950 border border-slate-700 rounded-full w-8 h-8 flex items-center justify-center text-[10px] font-black text-slate-500 italic shadow-xl">VS</div></div>
                       <div onClick={() => !actualWinner && makePrediction(selectedEvent.id, match.id, match.p2, selectedMethod[matchKey] || 'pinfall')} className={`flex-1 relative rounded-r-2xl overflow-hidden cursor-pointer transition-all duration-300 border-y border-r ${myPick === match.p2 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800 hover:border-slate-600'} ${actualWinner && actualWinner !== match.p2 ? 'grayscale opacity-50' : ''}`}>
-                         <WrestlerImage name={match.p2} className="w-full h-full" imageUrl={match.p2Image} />
+                         {/* Show grid of images for tag teams */}
+                         {match.p2Members && match.p2Members.length > 1 ? (
+                           <div className="w-full h-full grid grid-cols-2 gap-0.5">
+                             {match.p2Members.slice(0, 4).map((member, idx) => (
+                               <WrestlerImage key={idx} name={member.name} className="w-full h-full" imageUrl={member.image} />
+                             ))}
+                           </div>
+                         ) : (
+                           <WrestlerImage name={match.p2} className="w-full h-full" imageUrl={match.p2Image} />
+                         )}
                          <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent pt-12 pb-3 px-2 text-center">
-                           <span className={`block font-black text-lg uppercase leading-none ${myPick === match.p2 ? 'text-red-500' : 'text-white'}`}>{match.p2}</span>
+                           <span className={`block font-black ${match.p2.length > 20 ? 'text-sm' : 'text-lg'} uppercase leading-tight ${myPick === match.p2 ? 'text-red-500' : 'text-white'}`}>{match.p2}</span>
                            {myPick === match.p2 && <span className="text-[8px] font-bold bg-red-600 text-white px-2 py-0.5 rounded-full inline-block mt-1">YOUR PICK</span>}
                            {sentiment && sentiment.p2 > 50 && <div className="text-[8px] text-purple-400 font-bold mt-1">🔥 {sentiment.p2}% FAVORITE</div>}
                          </div>

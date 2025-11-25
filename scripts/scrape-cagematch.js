@@ -706,6 +706,14 @@ function parseEventDetails(html) {
           });
         }
         
+        // Check if this is a tag team match
+        const isTagMatch = matchType.toLowerCase().includes('tag') || 
+                          matchType.toLowerCase().includes('trios') ||
+                          matchType.toLowerCase().includes('six man') ||
+                          matchType.toLowerCase().includes('8 man') ||
+                          resultsHtml.includes(' & ') ||
+                          allLinks.length > 2;
+        
         // Extract winner and loser from "defeats" pattern
         let winner = null;
         let loser = null;
@@ -713,49 +721,62 @@ function parseEventDetails(html) {
         let p2 = null;
         let p1Image = null;
         let p2Image = null;
+        let p1Members = [];
+        let p2Members = [];
+        
+        // Filter out managers (in parentheses)
+        const mainWrestlers = allLinks.filter(l => {
+          const beforeLink = resultsHtml.substring(0, l.position);
+          return !beforeLink.endsWith('(w/') && !beforeLink.endsWith('(');
+        });
         
         if (resultsHtml.includes('defeats')) {
           const defeatsIndex = resultsHtml.indexOf('defeats');
           
-          // Get last link before "defeats" as winner
-          const beforeDefeats = allLinks.filter(l => l.position < defeatsIndex);
+          // Get all wrestlers before "defeats" as team 1
+          const beforeDefeats = mainWrestlers.filter(l => l.position < defeatsIndex);
+          // Get all wrestlers after "defeats" as team 2
+          const afterDefeats = mainWrestlers.filter(l => l.position > defeatsIndex);
+          
           if (beforeDefeats.length > 0) {
-            const winnerLink = beforeDefeats[beforeDefeats.length - 1];
-            winner = winnerLink.name;
-            p1 = winner;
-            p1Image = winnerLink.imageUrl;
+            p1Members = beforeDefeats.map(w => ({ name: w.name, image: w.imageUrl }));
+            // For display, join names with " & " if multiple, otherwise use single name
+            p1 = beforeDefeats.length > 1 
+              ? beforeDefeats.map(w => w.name).join(' & ')
+              : beforeDefeats[0].name;
+            p1Image = beforeDefeats[0].imageUrl;
+            winner = p1;
           }
           
-          // Get first link after "defeats" (before time) as loser
-          const afterDefeats = allLinks.filter(l => l.position > defeatsIndex);
           if (afterDefeats.length > 0) {
-            // Skip manager links (usually right after defeats)
-            const loserLink = afterDefeats.find(l => {
-              const textAfter = resultsHtml.substring(l.position);
-              return !textAfter.match(/^[^<]*\(/); // Not immediately followed by (
-            }) || afterDefeats[0];
-            loser = loserLink.name;
-            p2 = loser;
-            p2Image = loserLink.imageUrl;
+            p2Members = afterDefeats.map(w => ({ name: w.name, image: w.imageUrl }));
+            p2 = afterDefeats.length > 1 
+              ? afterDefeats.map(w => w.name).join(' & ')
+              : afterDefeats[0].name;
+            p2Image = afterDefeats[0].imageUrl;
+            loser = p2;
           }
-        } else if (allLinks.length >= 2) {
-          // If no "defeats", use first two main wrestlers (skip managers)
-          const mainWrestlers = allLinks.filter((l, idx) => {
-            // Skip if it's in parentheses (manager)
-            const beforeLink = resultsHtml.substring(0, l.position);
-            return !beforeLink.endsWith('(w/') && !beforeLink.endsWith('(');
-          });
-          
-          if (mainWrestlers.length >= 2) {
+        } else if (mainWrestlers.length >= 2) {
+          // No "defeats" - split wrestlers into two teams
+          // For tag matches, try to split evenly
+          if (isTagMatch && mainWrestlers.length >= 4) {
+            const midpoint = Math.floor(mainWrestlers.length / 2);
+            const team1 = mainWrestlers.slice(0, midpoint);
+            const team2 = mainWrestlers.slice(midpoint);
+            
+            p1Members = team1.map(w => ({ name: w.name, image: w.imageUrl }));
+            p2Members = team2.map(w => ({ name: w.name, image: w.imageUrl }));
+            p1 = team1.map(w => w.name).join(' & ');
+            p2 = team2.map(w => w.name).join(' & ');
+            p1Image = team1[0].imageUrl;
+            p2Image = team2[0].imageUrl;
+          } else {
             p1 = mainWrestlers[0].name;
             p1Image = mainWrestlers[0].imageUrl;
             p2 = mainWrestlers[1].name;
             p2Image = mainWrestlers[1].imageUrl;
-          } else if (allLinks.length >= 2) {
-            p1 = allLinks[0].name;
-            p1Image = allLinks[0].imageUrl;
-            p2 = allLinks[1].name;
-            p2Image = allLinks[1].imageUrl;
+            p1Members = [{ name: p1, image: p1Image }];
+            p2Members = [{ name: p2, image: p2Image }];
           }
         }
         
@@ -779,6 +800,9 @@ function parseEventDetails(html) {
             p2: p2,
             p1Image: p1Image,
             p2Image: p2Image,
+            p1Members: p1Members.length > 0 ? p1Members : [{ name: p1, image: p1Image }],
+            p2Members: p2Members.length > 0 ? p2Members : [{ name: p2, image: p2Image }],
+            isTeamMatch: isTagMatch || p1Members.length > 1 || p2Members.length > 1,
             winner: winner,
             time: matchTime,
             title: title || matchType
