@@ -50,7 +50,8 @@ import {
   BarChart3,
   LogOut,
   Shield,
-  Loader2
+  Loader2,
+  Tv
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -92,7 +93,8 @@ try {
   console.error('❌ Firebase initialization error:', error);
   firebaseError = error.message;
 }
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+// Use Firebase project ID from config, fall back to __app_id or default
+const appId = firebaseConfig.projectId || (typeof __app_id !== 'undefined' ? __app_id : 'default-app-id');
 const googleProvider = new GoogleAuthProvider();
 // Configure Google provider to always show account selection
 googleProvider.setCustomParameters({
@@ -323,6 +325,7 @@ export default function RingsidePickemFinal() {
   const [communitySentiment, setCommunitySentiment] = useState({}); // { eventId: { matchId: { p1: 65, p2: 35 } } }
   const [selectedMethod, setSelectedMethod] = useState({}); // { eventId-matchId: 'pinfall' }
   const [predictionsUserId, setPredictionsUserId] = useState(null); // Track which user's predictions we're showing
+  const [eventTypeFilter, setEventTypeFilter] = useState('ppv'); // 'ppv' or 'weekly'
   
   // Use ref to track current user ID - this won't cause re-renders and is always current
   const currentUserIdRef = useRef(null);
@@ -1117,6 +1120,30 @@ export default function RingsidePickemFinal() {
     return leaderboard;
   }, [leaderboard, leaderboardScope, userProfile, userId]);
 
+  // Helper function to determine if an event is a weekly show or PPV
+  const isWeeklyShow = (eventName) => {
+    const weeklyPatterns = [
+      /dynamite/i,
+      /collision/i,
+      /rampage/i,
+      /raw/i,
+      /smackdown/i,
+      /nxt(?!\s*(takeover|stand|deliver|deadline|vengeance|battleground))/i, // NXT but not TakeOver, Stand & Deliver, etc.
+      /main\s*event/i,
+      /superstars/i,
+      /thunder/i,
+      /nitro/i,
+      /impact(?!\s*(slammiversary|bound|hard|sacrifice|rebellion|against|genesis))/i,
+      /dark(?:\s|$)/i, // AEW Dark but not Darkest or similar
+      /elevation/i,
+      /world\s*tag/i,
+      /strong/i, // NJPW Strong
+      /road\s*to/i,
+    ];
+    
+    return weeklyPatterns.some(pattern => pattern.test(eventName));
+  };
+
   const myEvents = useMemo(() => {
     // CRITICAL: Safety check for subscriptions array
     const subs = userProfile?.subscriptions || [];
@@ -1124,7 +1151,8 @@ export default function RingsidePickemFinal() {
     // Use scraped events from Firestore if available, otherwise fall back to INITIAL_EVENTS
     const eventsToUse = scrapedEvents.length > 0 ? scrapedEvents : INITIAL_EVENTS;
     
-    return eventsToUse.filter(ev => {
+    // First filter by subscriptions
+    const subscribedEvents = eventsToUse.filter(ev => {
       // Match by promoId (wwe, aew, etc.) or by promotionId (1, 2287, etc.)
       return subs.includes(ev.promoId) || 
              (ev.promotionId && subs.some(sub => {
@@ -1132,7 +1160,13 @@ export default function RingsidePickemFinal() {
                return promoMap[sub] === ev.promotionId;
              }));
     });
-  }, [userProfile, scrapedEvents]);
+    
+    // Then filter by event type (PPV or Weekly)
+    return subscribedEvents.filter(ev => {
+      const isWeekly = isWeeklyShow(ev.name);
+      return eventTypeFilter === 'weekly' ? isWeekly : !isWeekly;
+    });
+  }, [userProfile, scrapedEvents, eventTypeFilter]);
 
   // --- VIEW: FIREBASE ERROR ---
   if (firebaseError) {
@@ -1512,7 +1546,33 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                 </div>
               </div>
             </div>
-            <div className="flex items-center justify-between px-1"><h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2"><Calendar size={12} /> Upcoming PPVs</h3></div>
+            {/* Event Type Toggle */}
+            <div className="flex items-center justify-between">
+              <div className="flex p-1 bg-slate-900 rounded-xl border border-slate-800">
+                <button 
+                  onClick={() => setEventTypeFilter('ppv')}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all flex items-center gap-2 ${
+                    eventTypeFilter === 'ppv' 
+                      ? 'bg-red-600 text-white shadow-lg' 
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Trophy size={14} />
+                  PPVs
+                </button>
+                <button 
+                  onClick={() => setEventTypeFilter('weekly')}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all flex items-center gap-2 ${
+                    eventTypeFilter === 'weekly' 
+                      ? 'bg-blue-600 text-white shadow-lg' 
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Tv size={14} />
+                  Weekly
+                </button>
+              </div>
+            </div>
             {myEvents.length === 0 ? (
                <div className="text-center py-12 bg-slate-900/50 rounded-xl border border-dashed border-slate-800"><Filter className="w-12 h-12 text-slate-700 mx-auto mb-3" /><p className="text-slate-500 text-sm mb-4">Feed empty.</p><button onClick={() => setActiveTab('settings')} className="bg-slate-800 text-white px-4 py-2 rounded-full text-xs font-bold">Add Promotions</button></div>
             ) : (
