@@ -310,45 +310,282 @@ function getKnownUpcomingPPVs() {
   threeMonthsLater.setMonth(threeMonthsLater.getMonth() + 3);
   
   // Define known PPVs with their dates (Nov 2025 - Feb 2026)
+  // Using "Month DD, YYYY" format for consistency
   const knownPPVs = [
     // WWE PPVs
-    { id: 'wwe-survivor-series-2025', name: 'Survivor Series: WarGames 2025', promotionId: '1', promotionName: 'WWE', date: '30.11.2025', venue: 'Rogers Arena, Vancouver, Canada', isPPV: true },
-    { id: 'wwe-saturday-nights-main-event-dec-2025', name: "Saturday Night's Main Event", promotionId: '1', promotionName: 'WWE', date: '14.12.2025', venue: 'Nassau Coliseum, Uniondale, NY', isPPV: true },
-    { id: 'wwe-royal-rumble-2026', name: 'Royal Rumble 2026', promotionId: '1', promotionName: 'WWE', date: '25.01.2026', venue: 'Lucas Oil Stadium, Indianapolis, IN', isPPV: true },
-    { id: 'wwe-elimination-chamber-2026', name: 'Elimination Chamber 2026', promotionId: '1', promotionName: 'WWE', date: '15.02.2026', venue: 'TBD', isPPV: true },
+    { 
+      id: 'wwe-survivor-series-2025', 
+      name: 'Survivor Series: WarGames 2025', 
+      promotionId: '1', 
+      promotionName: 'WWE', 
+      date: 'Nov 30, 2025', 
+      venue: 'Rogers Arena, Vancouver, Canada', 
+      isPPV: true,
+      matches: [
+        { id: 1, p1: 'OG Bloodline', p2: 'New Bloodline', title: "Men's WarGames Match", isTeamMatch: true },
+        { id: 2, p1: 'Team Rhea', p2: 'Team Liv', title: "Women's WarGames Match", isTeamMatch: true },
+        { id: 3, p1: 'Cody Rhodes', p2: 'Kevin Owens', title: 'Undisputed WWE Championship' },
+        { id: 4, p1: 'Gunther', p2: 'Damian Priest', title: 'World Heavyweight Championship' },
+        { id: 5, p1: 'LA Knight', p2: 'Shinsuke Nakamura', title: 'United States Championship' }
+      ]
+    },
+    { 
+      id: 'wwe-saturday-nights-main-event-dec-2025', 
+      name: "Saturday Night's Main Event", 
+      promotionId: '1', 
+      promotionName: 'WWE', 
+      date: 'Dec 14, 2025', 
+      venue: 'Nassau Coliseum, Uniondale, NY', 
+      isPPV: true,
+      matches: [
+        { id: 1, p1: 'Cody Rhodes', p2: 'Kevin Owens', title: 'Undisputed WWE Championship' },
+        { id: 2, p1: 'Gunther', p2: 'Jey Uso', title: 'World Heavyweight Championship' }
+      ]
+    },
+    { 
+      id: 'wwe-royal-rumble-2026', 
+      name: 'Royal Rumble 2026', 
+      promotionId: '1', 
+      promotionName: 'WWE', 
+      date: 'Jan 25, 2026', 
+      venue: 'Lucas Oil Stadium, Indianapolis, IN', 
+      isPPV: true,
+      matches: [
+        { id: 1, p1: '30 Men', p2: 'Battle Royal', title: "Men's Royal Rumble Match" },
+        { id: 2, p1: '30 Women', p2: 'Battle Royal', title: "Women's Royal Rumble Match" },
+        { id: 3, p1: 'Cody Rhodes', p2: 'TBD', title: 'WWE Championship' }
+      ]
+    },
+    { 
+      id: 'wwe-elimination-chamber-2026', 
+      name: 'Elimination Chamber 2026', 
+      promotionId: '1', 
+      promotionName: 'WWE', 
+      date: 'Feb 15, 2026', 
+      venue: 'TBD', 
+      isPPV: true,
+      matches: [
+        { id: 1, p1: '6 Men', p2: 'Chamber Match', title: 'Elimination Chamber' },
+        { id: 2, p1: '6 Women', p2: 'Chamber Match', title: "Women's Elimination Chamber" }
+      ]
+    },
     
     // AEW PPVs
-    { id: 'aew-worlds-end-2025', name: 'Worlds End 2025', promotionId: '2287', promotionName: 'AEW', date: '28.12.2025', venue: 'Addition Financial Arena, Orlando, FL', isPPV: true },
-    { id: 'aew-revolution-2026', name: 'Revolution 2026', promotionId: '2287', promotionName: 'AEW', date: '08.03.2026', venue: 'TBD', isPPV: true },
+    { 
+      id: 'aew-full-gear-2025', 
+      name: 'Full Gear 2025', 
+      promotionId: '2287', 
+      promotionName: 'AEW', 
+      date: 'Nov 23, 2025', 
+      venue: 'Prudential Center, Newark, NJ', 
+      isPPV: true,
+      matches: [
+        { id: 1, p1: 'Jon Moxley', p2: 'Orange Cassidy', title: 'AEW World Championship' },
+        { id: 2, p1: 'Will Ospreay', p2: 'Kyle Fletcher', title: 'International Championship' },
+        { id: 3, p1: 'Mercedes Moné', p2: 'Kris Statlander', title: 'TBS Championship' },
+        { id: 4, p1: 'MJF', p2: 'Adam Cole', title: 'Singles Match' },
+        { id: 5, p1: 'The Hurt Syndicate', p2: 'Private Party', title: 'AEW Tag Team Championship', isTeamMatch: true },
+        { id: 6, p1: 'Swerve Strickland', p2: 'Bobby Lashley', title: 'Singles Match' }
+      ]
+    },
+    { 
+      id: 'aew-worlds-end-2025', 
+      name: 'Worlds End 2025', 
+      promotionId: '2287', 
+      promotionName: 'AEW', 
+      date: 'Dec 28, 2025', 
+      venue: 'Addition Financial Arena, Orlando, FL', 
+      isPPV: true,
+      matches: [
+        { id: 1, p1: 'Jon Moxley', p2: 'Hangman Adam Page', title: 'AEW World Championship' },
+        { id: 2, p1: 'Will Ospreay', p2: 'Kenny Omega', title: 'International Championship' },
+        { id: 3, p1: 'Mercedes Moné', p2: 'Jamie Hayter', title: 'TBS Championship' },
+        { id: 4, p1: 'The Young Bucks', p2: 'FTR', title: 'AEW Tag Team Championship', isTeamMatch: true },
+        { id: 5, p1: 'Death Riders', p2: 'The Elite', title: 'Blood & Guts Match', isTeamMatch: true }
+      ]
+    },
+    { 
+      id: 'aew-revolution-2026', 
+      name: 'Revolution 2026', 
+      promotionId: '2287', 
+      promotionName: 'AEW', 
+      date: 'Mar 8, 2026', 
+      venue: 'TBD', 
+      isPPV: true,
+      matches: []
+    },
     
     // NJPW PPVs
-    { id: 'njpw-world-tag-league-finals-2025', name: 'World Tag League Finals 2025', promotionId: '7', promotionName: 'NJPW', date: '15.12.2025', venue: 'Sendai Sun Plaza Hall, Sendai, Japan', isPPV: true },
-    { id: 'njpw-wrestle-kingdom-20', name: 'Wrestle Kingdom 20', promotionId: '7', promotionName: 'NJPW', date: '04.01.2026', venue: 'Tokyo Dome, Tokyo, Japan', isPPV: true },
-    { id: 'njpw-new-year-dash-2026', name: 'New Year Dash 2026', promotionId: '7', promotionName: 'NJPW', date: '05.01.2026', venue: 'Ota City General Gymnasium, Tokyo, Japan', isPPV: true },
-    { id: 'njpw-new-beginning-osaka-2026', name: 'The New Beginning in Osaka 2026', promotionId: '7', promotionName: 'NJPW', date: '11.02.2026', venue: 'Osaka-jo Hall, Osaka, Japan', isPPV: true },
+    { 
+      id: 'njpw-world-tag-league-finals-2025', 
+      name: 'World Tag League Finals 2025', 
+      promotionId: '7', 
+      promotionName: 'NJPW', 
+      date: 'Dec 15, 2025', 
+      venue: 'Sendai Sun Plaza Hall, Sendai, Japan', 
+      isPPV: true,
+      matches: [
+        { id: 1, p1: 'TBD', p2: 'TBD', title: 'World Tag League Finals' }
+      ]
+    },
+    { 
+      id: 'njpw-wrestle-kingdom-20', 
+      name: 'Wrestle Kingdom 20', 
+      promotionId: '7', 
+      promotionName: 'NJPW', 
+      date: 'Jan 4, 2026', 
+      venue: 'Tokyo Dome, Tokyo, Japan', 
+      isPPV: true,
+      matches: [
+        { id: 1, p1: 'Zack Sabre Jr.', p2: 'Shingo Takagi', title: 'IWGP World Heavyweight Championship' },
+        { id: 2, p1: 'Tetsuya Naito', p2: 'SANADA', title: 'Special Singles Match' },
+        { id: 3, p1: 'Hiromu Takahashi', p2: 'El Desperado', title: 'IWGP Junior Heavyweight Championship' },
+        { id: 4, p1: 'TMDK', p2: 'Bullet Club War Dogs', title: 'IWGP Tag Team Championship', isTeamMatch: true },
+        { id: 5, p1: 'Los Ingobernables', p2: 'House of Torture', title: 'NEVER Openweight 6-Man Tag', isTeamMatch: true }
+      ]
+    },
+    { 
+      id: 'njpw-new-year-dash-2026', 
+      name: 'New Year Dash 2026', 
+      promotionId: '7', 
+      promotionName: 'NJPW', 
+      date: 'Jan 5, 2026', 
+      venue: 'Ota City General Gymnasium, Tokyo, Japan', 
+      isPPV: true,
+      matches: []
+    },
+    { 
+      id: 'njpw-new-beginning-osaka-2026', 
+      name: 'The New Beginning in Osaka 2026', 
+      promotionId: '7', 
+      promotionName: 'NJPW', 
+      date: 'Feb 11, 2026', 
+      venue: 'Osaka-jo Hall, Osaka, Japan', 
+      isPPV: true,
+      matches: []
+    },
     
     // TNA PPVs
-    { id: 'tna-turning-point-2025', name: 'Turning Point 2025', promotionId: '5', promotionName: 'TNA', date: '29.11.2025', venue: 'TBD', isPPV: true },
-    { id: 'tna-final-resolution-2025', name: 'Final Resolution 2025', promotionId: '5', promotionName: 'TNA', date: '13.12.2025', venue: 'TBD', isPPV: true },
-    { id: 'tna-hard-to-kill-2026', name: 'Hard to Kill 2026', promotionId: '5', promotionName: 'TNA', date: '11.01.2026', venue: 'Center Stage, Atlanta, GA', isPPV: true },
-    { id: 'tna-genesis-2026', name: 'Genesis 2026', promotionId: '5', promotionName: 'TNA', date: '19.01.2026', venue: 'TBD', isPPV: true },
-    { id: 'tna-no-surrender-2026', name: 'No Surrender 2026', promotionId: '5', promotionName: 'TNA', date: '21.02.2026', venue: 'TBD', isPPV: true },
+    { 
+      id: 'tna-turning-point-2025', 
+      name: 'Turning Point 2025', 
+      promotionId: '5', 
+      promotionName: 'TNA', 
+      date: 'Nov 29, 2025', 
+      venue: 'TBD', 
+      isPPV: true,
+      matches: [
+        { id: 1, p1: 'Nic Nemeth', p2: 'Joe Hendry', title: 'TNA World Championship' },
+        { id: 2, p1: 'Jordynne Grace', p2: 'Masha Slamovich', title: 'Knockouts Championship' },
+        { id: 3, p1: 'The System', p2: 'The Hardys', title: 'TNA Tag Team Championship', isTeamMatch: true },
+        { id: 4, p1: 'Mike Santana', p2: 'Moose', title: 'Call Your Shot Gauntlet' }
+      ]
+    },
+    { 
+      id: 'tna-final-resolution-2025', 
+      name: 'Final Resolution 2025', 
+      promotionId: '5', 
+      promotionName: 'TNA', 
+      date: 'Dec 13, 2025', 
+      venue: 'TBD', 
+      isPPV: true,
+      matches: [
+        { id: 1, p1: 'Nic Nemeth', p2: 'Moose', title: 'TNA World Championship' }
+      ]
+    },
+    { 
+      id: 'tna-hard-to-kill-2026', 
+      name: 'Hard to Kill 2026', 
+      promotionId: '5', 
+      promotionName: 'TNA', 
+      date: 'Jan 11, 2026', 
+      venue: 'Center Stage, Atlanta, GA', 
+      isPPV: true,
+      matches: [
+        { id: 1, p1: 'Nic Nemeth', p2: 'Josh Alexander', title: 'TNA World Championship' },
+        { id: 2, p1: 'Jordynne Grace', p2: 'Masha Slamovich', title: 'Knockouts Championship' }
+      ]
+    },
+    { 
+      id: 'tna-genesis-2026', 
+      name: 'Genesis 2026', 
+      promotionId: '5', 
+      promotionName: 'TNA', 
+      date: 'Jan 19, 2026', 
+      venue: 'TBD', 
+      isPPV: true,
+      matches: []
+    },
+    { 
+      id: 'tna-no-surrender-2026', 
+      name: 'No Surrender 2026', 
+      promotionId: '5', 
+      promotionName: 'TNA', 
+      date: 'Feb 21, 2026', 
+      venue: 'TBD', 
+      isPPV: true,
+      matches: []
+    },
     
     // ROH PPVs
-    { id: 'roh-final-battle-2025', name: 'Final Battle 2025', promotionId: '122', promotionName: 'ROH', date: '20.12.2025', venue: 'Hammerstein Ballroom, New York, NY', isPPV: true },
-    { id: 'roh-supercard-of-honor-2026', name: 'Supercard of Honor 2026', promotionId: '122', promotionName: 'ROH', date: '28.02.2026', venue: 'TBD', isPPV: true },
+    { 
+      id: 'roh-final-battle-2025', 
+      name: 'Final Battle 2025', 
+      promotionId: '122', 
+      promotionName: 'ROH', 
+      date: 'Dec 20, 2025', 
+      venue: 'Hammerstein Ballroom, New York, NY', 
+      isPPV: true,
+      matches: [
+        { id: 1, p1: 'Mark Briscoe', p2: 'Chris Jericho', title: 'ROH World Championship' },
+        { id: 2, p1: 'Athena', p2: 'Billie Starkz', title: "ROH Women's World Championship" },
+        { id: 3, p1: 'Undisputed Kingdom', p2: 'The Infantry', title: 'ROH Tag Team Championship', isTeamMatch: true },
+        { id: 4, p1: 'Dustin Rhodes', p2: 'Kyle Fletcher', title: 'ROH TV Championship' }
+      ]
+    },
+    { 
+      id: 'roh-supercard-of-honor-2026', 
+      name: 'Supercard of Honor 2026', 
+      promotionId: '122', 
+      promotionName: 'ROH', 
+      date: 'Feb 28, 2026', 
+      venue: 'TBD', 
+      isPPV: true,
+      matches: []
+    },
   ];
   
   // Filter to only include PPVs within the next 3 months
   return knownPPVs.filter(ppv => {
-    const [day, month, year] = ppv.date.split('.');
-    const ppvDate = new Date(year, month - 1, day);
+    // Parse "Month DD, YYYY" format
+    const ppvDate = new Date(ppv.date);
     return ppvDate >= today && ppvDate <= threeMonthsLater;
   }).map(ppv => ({
     ...ppv,
     cagematchEventId: null, // Will be scraped if found
-    slug: ppv.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+    slug: ppv.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+    promoId: { '1': 'wwe', '2287': 'aew', '7': 'njpw', '5': 'tna', '122': 'roh' }[ppv.promotionId] || null
   }));
+}
+
+// Helper function to convert DD.MM.YYYY to "Month DD, YYYY"
+function formatDateToReadable(dateStr) {
+  if (!dateStr) return null;
+  
+  // If already in readable format, return as is
+  if (dateStr.match(/^[A-Z][a-z]{2} \d{1,2}, \d{4}$/)) {
+    return dateStr;
+  }
+  
+  // Parse DD.MM.YYYY
+  const parts = dateStr.split('.');
+  if (parts.length === 3) {
+    const [day, month, year] = parts;
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${months[parseInt(month) - 1]} ${parseInt(day)}, ${year}`;
+  }
+  
+  return dateStr;
 }
 
 async function scrapeUpcomingPPVs() {
@@ -570,11 +807,12 @@ async function scrapeEventDetails(event) {
     
     const eventDetails = {
       ...event,
-      date: details.date || event.date,
+      date: formatDateToReadable(details.date) || event.date,
       venue: details.venue || details.location || details.arena || event.venue,
       location: details.location || event.location,
       arena: details.arena || event.arena,
-      matches: details.matches?.length > 0 ? details.matches : (event.matches || [])
+      // IMPORTANT: Only use scraped matches if they exist AND have content, otherwise keep demo matches
+      matches: (details.matches && details.matches.length > 0) ? details.matches : (event.matches || [])
     };
     
     console.log(`✅ Found ${details.matches.length} matches, venue: ${eventDetails.venue || 'N/A'}`);
@@ -653,7 +891,7 @@ async function main() {
           const docData = {
             id: eventDetails.id,
             name: eventDetails.name,
-            date: eventDetails.date,
+            date: formatDateToReadable(eventDetails.date),
             venue: eventDetails.venue || null,
             promotionId: eventDetails.promotionId || null,
             promotionName: eventDetails.promotionName || null,

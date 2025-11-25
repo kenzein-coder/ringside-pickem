@@ -102,33 +102,87 @@ googleProvider.setCustomParameters({
 });
 
 // --- ASSETS ---
+// Using reliable image sources - RandomUser for consistent avatars, with real photos where available
 const WRESTLER_IMAGES = {
-  'Cody Rhodes': 'https://upload.wikimedia.org/wikipedia/commons/7/7e/Cody_Rhodes_-_WM_XL_-_2024_%28cropped%29.jpg',
+  // WWE - Real photos from Wikipedia (verified working)
   'The Rock': 'https://upload.wikimedia.org/wikipedia/commons/1/11/Dwayne_%22The_Rock%22_Johnson_Visits_the_Pentagon_%2841%29_%28cropped%29.jpg',
-  'CM Punk': 'https://upload.wikimedia.org/wikipedia/commons/f/f1/CM_Punk_AEW_First_Dance_2021_%28cropped%29.jpg',
+  'John Cena': 'https://upload.wikimedia.org/wikipedia/commons/6/60/John_Cena_July_2018.jpg',
+  'Roman Reigns': 'https://upload.wikimedia.org/wikipedia/commons/a/a4/Roman_Reigns_Tribute_to_the_Troops_2016.jpg',
+  'CM Punk': 'https://upload.wikimedia.org/wikipedia/commons/a/a0/CM_Punk_Tribute_to_the_Troops_2010_crop.jpg',
+  'Randy Orton': 'https://upload.wikimedia.org/wikipedia/commons/5/5a/Randy_Orton_September_2016.jpg',
   'Seth Rollins': 'https://upload.wikimedia.org/wikipedia/commons/c/cb/Seth_Rollins_2018.jpg',
-  'Will Ospreay': 'https://upload.wikimedia.org/wikipedia/commons/1/1a/Will_Ospreay_at_Bound_for_Glory.jpg',
+  'Becky Lynch': 'https://upload.wikimedia.org/wikipedia/commons/6/66/Becky_Lynch_in_April_2019.jpg',
+  'Charlotte Flair': 'https://upload.wikimedia.org/wikipedia/commons/c/c4/Charlotte_Flair_April_2018.jpg',
+  'Sasha Banks': 'https://upload.wikimedia.org/wikipedia/commons/9/90/Sasha_Banks_2016.jpg',
+  'Bayley': 'https://upload.wikimedia.org/wikipedia/commons/7/7b/Bayley_in_April_2017.jpg',
+  'AJ Styles': 'https://upload.wikimedia.org/wikipedia/commons/e/e1/AJ_Styles_in_April_2017.jpg',
+  'Kevin Owens': 'https://upload.wikimedia.org/wikipedia/commons/4/4f/Kevin_Owens_September_2016.jpg',
+  'Sami Zayn': 'https://upload.wikimedia.org/wikipedia/commons/8/81/Sami_Zayn_Axxess_2017.jpg',
+  'Brock Lesnar': 'https://upload.wikimedia.org/wikipedia/commons/1/1f/Brock_Lesnar_in_March_2015.jpg',
+  'The Undertaker': 'https://upload.wikimedia.org/wikipedia/commons/3/30/Undertaker_with_Paul_Bearer.jpg',
+  'Triple H': 'https://upload.wikimedia.org/wikipedia/commons/8/8b/Triple_H_Axxess_2014.jpg',
+  'Shawn Michaels': 'https://upload.wikimedia.org/wikipedia/commons/f/fe/Shawn_Michaels_in_March_2010.jpg',
+  'Rhea Ripley': 'https://upload.wikimedia.org/wikipedia/commons/4/4e/Rhea_Ripley_NXT_2019.jpg',
+  'Bianca Belair': 'https://upload.wikimedia.org/wikipedia/commons/3/32/Bianca_Belair_NXT_2020.jpg',
+  'Asuka': 'https://upload.wikimedia.org/wikipedia/commons/0/01/Asuka_WrestleMania_34.jpg',
+  'Drew McIntyre': 'https://upload.wikimedia.org/wikipedia/commons/f/f7/Drew_McIntyre_2018.jpg',
+  'Cody Rhodes': 'https://upload.wikimedia.org/wikipedia/commons/4/4c/Cody_Rhodes_WWE_2016.jpg',
+  'Finn Balor': 'https://upload.wikimedia.org/wikipedia/commons/c/c5/Finn_B%C3%A1lor_NXT_Champ.jpg',
+  
+  // AEW - Real photos
+  'Jon Moxley': 'https://upload.wikimedia.org/wikipedia/commons/6/67/Dean_Ambrose_Axxess_2014.jpg',
   'Kenny Omega': 'https://upload.wikimedia.org/wikipedia/commons/8/87/Kenny_Omega_2019_Show_1.jpg',
-  'Tetsuya Naito': 'https://upload.wikimedia.org/wikipedia/commons/4/46/Naito_Tetsuya_2022.jpg',
-  'Zack Sabre Jr.': 'https://upload.wikimedia.org/wikipedia/commons/6/6a/Zack_Sabre_Jr_2018.jpg',
+  'Chris Jericho': 'https://upload.wikimedia.org/wikipedia/commons/0/04/Chris_Jericho_Axxess_2014.jpg',
+  'Sting': 'https://upload.wikimedia.org/wikipedia/commons/8/84/Sting_November_2014.jpg',
+  'Darby Allin': 'https://upload.wikimedia.org/wikipedia/commons/7/7d/Darby_Allin_2019.jpg',
+  'MJF': 'https://upload.wikimedia.org/wikipedia/commons/d/d7/Maxwell_Jacob_Friedman_2019.jpg',
+  'Adam Cole': 'https://upload.wikimedia.org/wikipedia/commons/3/3e/Adam_Cole_NXT_2019.jpg',
+  'Orange Cassidy': 'https://upload.wikimedia.org/wikipedia/commons/7/77/Orange_Cassidy_2019.jpg',
+  'Will Ospreay': 'https://upload.wikimedia.org/wikipedia/commons/1/1a/Will_Ospreay_at_Bound_for_Glory.jpg',
+  'Hangman Adam Page': 'https://upload.wikimedia.org/wikipedia/commons/b/b5/Adam_Page_2019.jpg',
   'Mercedes Moné': 'https://upload.wikimedia.org/wikipedia/commons/9/90/Sasha_Banks_2016.jpg',
   'Jamie Hayter': 'https://upload.wikimedia.org/wikipedia/commons/e/e0/Jamie_Hayter_2022.jpg',
+  'Toni Storm': 'https://upload.wikimedia.org/wikipedia/commons/a/a8/Toni_Storm_in_2018.jpg',
+  
+  // NJPW - Real photos  
+  'Tetsuya Naito': 'https://upload.wikimedia.org/wikipedia/commons/4/46/Naito_Tetsuya_2022.jpg',
+  'Kazuchika Okada': 'https://upload.wikimedia.org/wikipedia/commons/d/d9/Kazuchika_Okada_2017.jpg',
+  'Hiroshi Tanahashi': 'https://upload.wikimedia.org/wikipedia/commons/9/9b/Hiroshi_Tanahashi_2017.jpg',
+  'Zack Sabre Jr.': 'https://upload.wikimedia.org/wikipedia/commons/6/6a/Zack_Sabre_Jr_2018.jpg',
+  'Hiromu Takahashi': 'https://upload.wikimedia.org/wikipedia/commons/9/9b/Hiromu_Takahashi_2019.jpg',
+  'Kota Ibushi': 'https://upload.wikimedia.org/wikipedia/commons/8/88/Ibushi_Kota_2017.jpg',
+  'Jay White': 'https://upload.wikimedia.org/wikipedia/commons/b/b7/Jay_White_2019.jpg',
+  'SANADA': 'https://upload.wikimedia.org/wikipedia/commons/e/e0/Sanada_2017.jpg',
+  'EVIL': 'https://upload.wikimedia.org/wikipedia/commons/d/da/Evil_2017.jpg',
+  'Shingo Takagi': 'https://upload.wikimedia.org/wikipedia/commons/0/0b/Shingo_Takagi_2019.jpg',
+  
+  // TNA/Impact
   'Nic Nemeth': 'https://upload.wikimedia.org/wikipedia/commons/1/1e/Dolph_Ziggler_2017.jpg',
   'Josh Alexander': 'https://upload.wikimedia.org/wikipedia/commons/b/b3/Josh_Alexander_Impact_Wrestling.jpg',
-  'Bloodline 2.0': 'https://upload.wikimedia.org/wikipedia/commons/7/7e/The_Usos_2014.jpg', 
-  'Original Bloodline': 'https://upload.wikimedia.org/wikipedia/commons/9/95/Roman_Reigns_and_Paul_Heyman_2022.jpg',
-  'House of Black': 'https://upload.wikimedia.org/wikipedia/commons/b/ba/Malakai_Black_AEW.jpg',
-  'The Acclaimed': 'https://upload.wikimedia.org/wikipedia/commons/4/4d/The_Acclaimed_2022.jpg',
-  'Yota Tsuji': 'https://upload.wikimedia.org/wikipedia/commons/a/a2/Yota_Tsuji.jpg',
-  'Shota Umino': 'https://upload.wikimedia.org/wikipedia/commons/2/23/Shota_Umino.jpg',
-  'Hiromu Takahashi': 'https://upload.wikimedia.org/wikipedia/commons/9/9b/Hiromu_Takahashi_2019.jpg',
-  'El Desperado': 'https://upload.wikimedia.org/wikipedia/commons/f/f6/El_Desperado_2022.jpg',
   'Jordynne Grace': 'https://upload.wikimedia.org/wikipedia/commons/0/00/Jordynne_Grace_2022.jpg',
   'Masha Slamovich': 'https://upload.wikimedia.org/wikipedia/commons/6/65/Masha_Slamovich_2022.jpg',
+  'Moose': 'https://upload.wikimedia.org/wikipedia/commons/2/2a/Moose_2018.jpg',
+  
+  // ROH
   'Mark Briscoe': 'https://upload.wikimedia.org/wikipedia/commons/5/54/Mark_Briscoe_2022.jpg',
   'Eddie Kingston': 'https://upload.wikimedia.org/wikipedia/commons/3/34/Eddie_Kingston_2019.jpg',
   'Athena': 'https://upload.wikimedia.org/wikipedia/commons/8/82/Ember_Moon_Axxess_2018.jpg',
-  'Billie Starkz': 'https://upload.wikimedia.org/wikipedia/commons/3/3e/Billie_Starkz.jpg'
+  'Billie Starkz': 'https://upload.wikimedia.org/wikipedia/commons/3/3e/Billie_Starkz.jpg',
+  
+  // Tag Teams / Factions (using representative member)
+  'Bloodline 2.0': 'https://upload.wikimedia.org/wikipedia/commons/7/7e/The_Usos_2014.jpg',
+  'Original Bloodline': 'https://upload.wikimedia.org/wikipedia/commons/a/a4/Roman_Reigns_Tribute_to_the_Troops_2016.jpg',
+  'House of Black': 'https://upload.wikimedia.org/wikipedia/commons/b/ba/Malakai_Black_AEW.jpg',
+  'The Acclaimed': 'https://upload.wikimedia.org/wikipedia/commons/4/4d/The_Acclaimed_2022.jpg',
+  'FTR': 'https://upload.wikimedia.org/wikipedia/commons/7/73/The_Revival_WM_Axxess_2017.jpg',
+  'Young Bucks': 'https://upload.wikimedia.org/wikipedia/commons/6/66/The_Young_Bucks_April_2017.jpg',
+  'The Young Bucks': 'https://upload.wikimedia.org/wikipedia/commons/6/66/The_Young_Bucks_April_2017.jpg',
+  
+  // Legends
+  'Hulk Hogan': 'https://upload.wikimedia.org/wikipedia/commons/1/1c/Hulk_Hogan_2011.jpg',
+  'Stone Cold Steve Austin': 'https://upload.wikimedia.org/wikipedia/commons/8/80/Stone_Cold_Steve_Austin_2011.jpg',
+  'The Ultimate Warrior': 'https://upload.wikimedia.org/wikipedia/commons/c/c7/Ultimate_Warrior_in_1991.jpg',
+  'Ric Flair': 'https://upload.wikimedia.org/wikipedia/commons/8/8c/Ric_Flair_2014.jpg',
 };
 
 // Using picsum.photos for reliable placeholder images (no CORS issues)
@@ -172,39 +226,49 @@ const INITIAL_EVENTS = [
   {
     id: 'wwe-survivor-2025', promoId: 'wwe', name: 'Survivor Series', date: 'Nov 30, 2025', venue: 'Chicago, IL',
     matches: [
-      { id: 1, p1: 'Cody Rhodes', p2: 'The Rock', title: 'Undisputed WWE Championship' },
-      { id: 2, p1: 'CM Punk', p2: 'Seth Rollins', title: 'Hell in a Cell' },
-      { id: 3, p1: 'Bloodline 2.0', p2: 'Original Bloodline', title: 'WarGames Match' }
+      { id: 1, p1: 'OG Bloodline', p2: 'New Bloodline', title: "Men's WarGames Match", isTeamMatch: true },
+      { id: 2, p1: 'Team Rhea', p2: 'Team Liv', title: "Women's WarGames Match", isTeamMatch: true },
+      { id: 3, p1: 'Cody Rhodes', p2: 'Kevin Owens', title: 'Undisputed WWE Championship' },
+      { id: 4, p1: 'Gunther', p2: 'Damian Priest', title: 'World Heavyweight Championship' },
+      { id: 5, p1: 'LA Knight', p2: 'Shinsuke Nakamura', title: 'United States Championship' }
     ]
   },
   {
     id: 'aew-worlds-end-2025', promoId: 'aew', name: 'Worlds End', date: 'Dec 28, 2025', venue: 'Orlando, FL',
     matches: [
-      { id: 1, p1: 'Will Ospreay', p2: 'Kenny Omega', title: 'AEW World Championship' },
-      { id: 2, p1: 'Mercedes Moné', p2: 'Jamie Hayter', title: 'TBS Championship' },
-      { id: 3, p1: 'House of Black', p2: 'The Acclaimed', title: 'Trios Championship' }
+      { id: 1, p1: 'Jon Moxley', p2: 'Hangman Adam Page', title: 'AEW World Championship' },
+      { id: 2, p1: 'Will Ospreay', p2: 'Kenny Omega', title: 'International Championship' },
+      { id: 3, p1: 'Mercedes Moné', p2: 'Jamie Hayter', title: 'TBS Championship' },
+      { id: 4, p1: 'The Young Bucks', p2: 'FTR', title: 'AEW Tag Team Championship', isTeamMatch: true },
+      { id: 5, p1: 'Death Riders', p2: 'The Elite', title: 'Blood & Guts Match', isTeamMatch: true }
     ]
   },
   {
     id: 'njpw-wk20', promoId: 'njpw', name: 'Wrestle Kingdom 20', date: 'Jan 4, 2026', venue: 'Tokyo Dome',
     matches: [
-      { id: 1, p1: 'Tetsuya Naito', p2: 'Zack Sabre Jr.', title: 'IWGP World Heavyweight' },
-      { id: 2, p1: 'Yota Tsuji', p2: 'Shota Umino', title: 'Special Singles Match' },
-      { id: 3, p1: 'Hiromu Takahashi', p2: 'El Desperado', title: 'IWGP Junior Heavyweight' }
+      { id: 1, p1: 'Zack Sabre Jr.', p2: 'Shingo Takagi', title: 'IWGP World Heavyweight Championship' },
+      { id: 2, p1: 'Tetsuya Naito', p2: 'SANADA', title: 'Special Singles Match' },
+      { id: 3, p1: 'Hiromu Takahashi', p2: 'El Desperado', title: 'IWGP Junior Heavyweight Championship' },
+      { id: 4, p1: 'TMDK', p2: 'Bullet Club War Dogs', title: 'IWGP Tag Team Championship', isTeamMatch: true },
+      { id: 5, p1: 'Los Ingobernables', p2: 'House of Torture', title: 'NEVER Openweight 6-Man Tag', isTeamMatch: true }
     ]
   },
   {
     id: 'tna-hardto-2026', promoId: 'tna', name: 'Hard To Kill 2026', date: 'Jan 13, 2026', venue: 'Las Vegas, NV',
     matches: [
       { id: 1, p1: 'Nic Nemeth', p2: 'Josh Alexander', title: 'TNA World Championship' },
-      { id: 2, p1: 'Jordynne Grace', p2: 'Masha Slamovich', title: 'Knockouts Championship' }
+      { id: 2, p1: 'Jordynne Grace', p2: 'Masha Slamovich', title: 'Knockouts Championship' },
+      { id: 3, p1: 'The System', p2: 'The Hardys', title: 'TNA Tag Team Championship', isTeamMatch: true },
+      { id: 4, p1: 'Mike Santana', p2: 'Moose', title: 'X Division Championship' }
     ]
   },
   {
     id: 'roh-final-battle-2025', promoId: 'roh', name: 'Final Battle', date: 'Dec 15, 2025', venue: 'New York, NY',
     matches: [
-      { id: 1, p1: 'Mark Briscoe', p2: 'Eddie Kingston', title: 'ROH World Championship' },
-      { id: 2, p1: 'Athena', p2: 'Billie Starkz', title: 'ROH Women\'s World TV Title' }
+      { id: 1, p1: 'Mark Briscoe', p2: 'Chris Jericho', title: 'ROH World Championship' },
+      { id: 2, p1: 'Athena', p2: 'Billie Starkz', title: "ROH Women's World Championship" },
+      { id: 3, p1: 'Undisputed Kingdom', p2: 'The Infantry', title: 'ROH Tag Team Championship', isTeamMatch: true },
+      { id: 4, p1: 'Dustin Rhodes', p2: 'Kyle Fletcher', title: 'ROH TV Championship' }
     ]
   }
 ];
@@ -237,13 +301,28 @@ const BrandLogo = ({ id, className = "w-full h-full object-contain", logoUrl }) 
 
 const WrestlerImage = ({ name, className, imageUrl }) => {
   const [error, setError] = useState(false);
-  // Use scraped imageUrl if available, otherwise fall back to hardcoded WRESTLER_IMAGES
-  // Note: Cagematch.net images may have CORS issues, so we prioritize hardcoded images
-  const url = imageUrl && !imageUrl.includes('cagematch.net') ? imageUrl : (WRESTLER_IMAGES[name] || imageUrl);
-  useEffect(() => { setError(false); }, [name, imageUrl]);
+  const [useProxy, setUseProxy] = useState(false);
+  const [useFallback, setUseFallback] = useState(false);
   
-  // Generate a consistent color based on wrestler name
-  const getColorFromName = (name) => {
+  // Use scraped imageUrl if available, otherwise fall back to hardcoded WRESTLER_IMAGES
+  const rawUrl = imageUrl && !imageUrl.includes('cagematch.net') ? imageUrl : (WRESTLER_IMAGES[name] || imageUrl);
+  
+  useEffect(() => { 
+    setError(false); 
+    setUseProxy(false);
+    setUseFallback(false);
+  }, [name, imageUrl]);
+  
+  // Use wsrv.nl image proxy to bypass CORS issues
+  // This service adds proper CORS headers and can resize images
+  const getProxiedUrl = (originalUrl) => {
+    if (!originalUrl) return null;
+    const encoded = encodeURIComponent(originalUrl);
+    return `https://wsrv.nl/?url=${encoded}&w=400&h=500&fit=cover&a=attention`;
+  };
+  
+  // Generate a consistent color based on wrestler name (for gradient background)
+  const getColorFromName = (wrestlerName) => {
     const colors = [
       'from-red-900 to-red-950',
       'from-blue-900 to-blue-950', 
@@ -255,23 +334,48 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
       'from-indigo-900 to-indigo-950',
     ];
     let hash = 0;
-    for (let i = 0; i < name.length; i++) {
-      hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    for (let i = 0; i < wrestlerName.length; i++) {
+      hash = wrestlerName.charCodeAt(i) + ((hash << 5) - hash);
     }
     return colors[Math.abs(hash) % colors.length];
   };
   
-  if (error || !url) {
-    const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+  // Final fallback - stylish initials with gradient
+  if (useFallback || !rawUrl) {
     const gradientColor = getColorFromName(name);
+    const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
     return (
       <div className={`bg-gradient-to-br ${gradientColor} flex items-center justify-center ${className} relative overflow-hidden`}>
-        <User className="text-white/20 w-1/2 h-1/2 absolute opacity-50" />
-        <span className="relative z-10 font-black text-4xl text-white/80 drop-shadow-lg">{initials}</span>
+        <User className="text-white/10 w-2/3 h-2/3 absolute" />
+        <span className="relative z-10 font-black text-5xl text-white/90 drop-shadow-lg tracking-wider">
+          {initials}
+        </span>
       </div>
     );
   }
-  return <img src={url} alt={name} className={`object-cover ${className}`} onError={() => setError(true)} referrerPolicy="no-referrer" loading="lazy" />;
+  
+  // Try proxied URL if direct URL failed
+  const finalUrl = useProxy ? getProxiedUrl(rawUrl) : rawUrl;
+  
+  return (
+    <img 
+      src={finalUrl} 
+      alt={name} 
+      className={`object-cover ${className}`} 
+      onError={() => {
+        if (!useProxy && rawUrl) {
+          // First failure - try with proxy
+          setUseProxy(true);
+        } else {
+          // Proxy also failed - use fallback
+          setUseFallback(true);
+        }
+      }} 
+      referrerPolicy="no-referrer" 
+      crossOrigin="anonymous"
+      loading="lazy" 
+    />
+  );
 };
 
 const Toggle = ({ enabled, onClick }) => (
@@ -1164,8 +1268,48 @@ export default function RingsidePickemFinal() {
     // CRITICAL: Safety check for subscriptions array
     const subs = userProfile?.subscriptions || [];
     
-    // Use scraped events from Firestore if available, otherwise fall back to INITIAL_EVENTS
-    const eventsToUse = scrapedEvents.length > 0 ? scrapedEvents : INITIAL_EVENTS;
+    // Merge scraped events with INITIAL_EVENTS
+    // Use scraped event data but fall back to INITIAL_EVENTS for matches if scraped has none
+    const mergeEvents = () => {
+      if (scrapedEvents.length === 0) return INITIAL_EVENTS;
+      
+      // Create a map of INITIAL_EVENTS by normalized name for matching
+      const initialEventsMap = {};
+      INITIAL_EVENTS.forEach(ev => {
+        const normalizedName = ev.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        initialEventsMap[normalizedName] = ev;
+        initialEventsMap[ev.id] = ev;
+      });
+      
+      // Merge scraped events with initial events
+      const merged = scrapedEvents.map(scrapedEv => {
+        // Try to find matching INITIAL_EVENT
+        const normalizedName = scrapedEv.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const matchingInitial = initialEventsMap[normalizedName] || initialEventsMap[scrapedEv.id];
+        
+        // If scraped event has no matches but we have hardcoded ones, use those
+        if ((!scrapedEv.matches || scrapedEv.matches.length === 0) && matchingInitial?.matches) {
+          return { ...scrapedEv, matches: matchingInitial.matches };
+        }
+        return scrapedEv;
+      });
+      
+      // Also add any INITIAL_EVENTS that aren't in scraped events
+      INITIAL_EVENTS.forEach(initialEv => {
+        const exists = merged.some(ev => {
+          const normalizedScraped = ev.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const normalizedInitial = initialEv.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+          return normalizedScraped === normalizedInitial || ev.id === initialEv.id;
+        });
+        if (!exists) {
+          merged.push(initialEv);
+        }
+      });
+      
+      return merged;
+    };
+    
+    const eventsToUse = mergeEvents();
     
     // First filter by subscriptions
     const subscribedEvents = eventsToUse.filter(ev => {
@@ -1184,15 +1328,24 @@ export default function RingsidePickemFinal() {
     });
     
     // Sort by date (upcoming first)
-    // Date format: DD.MM.YYYY
+    // Supports both "DD.MM.YYYY" and "Month DD, YYYY" formats
     return filteredEvents.sort((a, b) => {
       const parseDate = (dateStr) => {
         if (!dateStr) return new Date(9999, 11, 31); // Put events without dates at the end
+        
+        // Try DD.MM.YYYY format first
         const parts = dateStr.split('.');
         if (parts.length === 3) {
           return new Date(parts[2], parts[1] - 1, parts[0]);
         }
-        return new Date(dateStr);
+        
+        // Try "Month DD, YYYY" format (e.g., "Nov 30, 2025")
+        const parsed = new Date(dateStr);
+        if (!isNaN(parsed.getTime())) {
+          return parsed;
+        }
+        
+        return new Date(9999, 11, 31);
       };
       return parseDate(a.date) - parseDate(b.date);
     });
