@@ -1606,7 +1606,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                              {isGraded && <div className="bg-green-500/20 text-green-400 px-2 py-1 rounded text-[10px] font-black uppercase flex items-center gap-1"><CheckCircle size={10} /> Complete</div>}
                           </div>
                           <h4 className="font-black text-2xl text-white leading-none mb-1 italic uppercase shadow-black drop-shadow-md">{event.name}</h4>
-                          <div className="flex items-center gap-2 text-xs text-slate-300 font-medium"><span className="flex items-center gap-1"><Calendar size={10} /> {event.date}</span><span className="w-1 h-1 rounded-full bg-slate-500"></span><span className="flex items-center gap-1"><MapPin size={10} /> {event.venue}</span></div>
+                          <div className="flex items-center gap-2 text-xs text-slate-300 font-medium"><span className="flex items-center gap-1"><Calendar size={10} /> {event.date}</span>{event.venue && event.venue !== 'TBD' && <><span className="w-1 h-1 rounded-full bg-slate-500"></span><span className="flex items-center gap-1"><MapPin size={10} /> {event.venue}</span></>}{(!event.venue || event.venue === 'TBD') && <><span className="w-1 h-1 rounded-full bg-slate-500"></span><span className="flex items-center gap-1 text-slate-500"><MapPin size={10} /> TBA</span></>}</div>
                         </div>
                         <div className="bg-white/10 p-2 rounded-full backdrop-blur-sm group-hover:bg-red-600 transition-colors"><ChevronRight className="text-white" size={20} /></div>
                       </div>
