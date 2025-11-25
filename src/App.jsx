@@ -2570,6 +2570,15 @@ export default function RingsidePickemFinal() {
 
   // Helper function to determine if an event is a weekly show or PPV
   const isWeeklyShow = (eventName) => {
+    // First check for known PPV names that might match weekly patterns
+    const ppvExceptions = [
+      /saturday\s*night'?s\s*main\s*event/i, // This is a PPV, not weekly
+      /world\s*tag\s*league\s*finals/i, // NJPW PPV
+    ];
+    if (ppvExceptions.some(pattern => pattern.test(eventName))) {
+      return false; // It's a PPV, not a weekly show
+    }
+    
     const weeklyPatterns = [
       /dynamite/i,
       /collision/i,
@@ -2577,14 +2586,12 @@ export default function RingsidePickemFinal() {
       /raw/i,
       /smackdown/i,
       /nxt(?!\s*(takeover|stand|deliver|deadline|vengeance|battleground))/i, // NXT but not TakeOver, Stand & Deliver, etc.
-      /main\s*event/i,
       /superstars/i,
       /thunder/i,
       /nitro/i,
       /impact(?!\s*(slammiversary|bound|hard|sacrifice|rebellion|against|genesis))/i,
       /dark(?:\s|$)/i, // AEW Dark but not Darkest or similar
       /elevation/i,
-      /world\s*tag/i,
       /strong/i, // NJPW Strong
       /road\s*to/i,
     ];
@@ -2649,40 +2656,52 @@ export default function RingsidePickemFinal() {
              }));
     });
     
-    // Helper to parse date string
+    // Helper to parse date string and normalize to start of day
     const parseDate = (dateStr) => {
       if (!dateStr) return new Date(9999, 11, 31); // Put events without dates at the end
       
+      let date;
       // Try DD.MM.YYYY format first
       const parts = dateStr.split('.');
       if (parts.length === 3) {
-        return new Date(parts[2], parts[1] - 1, parts[0]);
+        date = new Date(parts[2], parts[1] - 1, parts[0]);
+      } else {
+        // Try "Month DD, YYYY" format (e.g., "Nov 30, 2025")
+        date = new Date(dateStr);
+        if (isNaN(date.getTime())) {
+          return new Date(9999, 11, 31);
+        }
       }
       
-      // Try "Month DD, YYYY" format (e.g., "Nov 30, 2025")
-      const parsed = new Date(dateStr);
-      if (!isNaN(parsed.getTime())) {
-        return parsed;
-      }
-      
-      return new Date(9999, 11, 31);
+      // Normalize to start of day (midnight) for accurate comparison
+      date.setHours(0, 0, 0, 0);
+      return date;
     };
     
     // Filter by event type and date
     const today = new Date();
     today.setHours(0, 0, 0, 0); // Reset to start of day
     
+    // Calculate one month from today for limiting upcoming events
+    const oneMonthFromToday = new Date(today);
+    oneMonthFromToday.setMonth(oneMonthFromToday.getMonth() + 1);
+    
     const filteredEvents = subscribedEvents.filter(ev => {
       const isWeekly = isWeeklyShow(ev.name);
       const eventDate = parseDate(ev.date);
+      // Event is past if its date is before today (not including today)
+      // So if event is Nov 25 and today is Nov 26, it's past ✓
+      // If event is Nov 25 and today is Nov 25, it's still upcoming (happening today)
       const isPast = eventDate < today;
+      // Event is within one month if it's today or in the future, but not more than 1 month away
+      const isWithinOneMonth = eventDate >= today && eventDate <= oneMonthFromToday;
       
       if (eventTypeFilter === 'past') {
-        return isPast && !isWeekly; // Past PPVs only
+        return isPast && !isWeekly; // Past PPVs only (no date limit)
       } else if (eventTypeFilter === 'weekly') {
-        return !isPast && isWeekly; // Upcoming weekly shows
+        return !isPast && isWeekly && isWithinOneMonth; // Upcoming weekly shows within 1 month
       } else {
-        return !isPast && !isWeekly; // Upcoming PPVs (default)
+        return !isPast && !isWeekly && isWithinOneMonth; // Upcoming PPVs within 1 month (default)
       }
     });
     

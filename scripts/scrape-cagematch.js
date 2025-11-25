@@ -277,8 +277,208 @@ async function scrapeRecentEvents() {
   }
 }
 
+// Generate future weekly shows based on known schedules
+function generateFutureWeeklyShows() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const oneMonthLater = new Date(today);
+  oneMonthLater.setMonth(oneMonthLater.getMonth() + 1);
+  
+  const weeklyShows = [];
+  
+  // Find next occurrence of a day of week
+  const getNextDayOfWeek = (dayOfWeek, startDate = today) => {
+    const date = new Date(startDate);
+    const currentDay = date.getDay();
+    const daysUntil = (dayOfWeek - currentDay + 7) % 7;
+    if (daysUntil === 0 && date.getTime() === startDate.getTime()) {
+      return date; // Today is the day
+    }
+    date.setDate(date.getDate() + (daysUntil || 7));
+    return date;
+  };
+  
+  // AEW Dynamite - Every Wednesday
+  let dynamiteDate = getNextDayOfWeek(3); // Wednesday = 3
+  let dynamiteNum = 320; // Start from a reasonable number
+  while (dynamiteDate <= oneMonthLater) {
+    weeklyShows.push({
+      id: `aew-dynamite-${dynamiteNum}`,
+      promotionId: '2287',
+      promotionName: 'All Elite Wrestling',
+      name: `AEW Dynamite #${dynamiteNum}`,
+      date: formatDateToReadable(`${dynamiteDate.getDate().toString().padStart(2, '0')}.${(dynamiteDate.getMonth() + 1).toString().padStart(2, '0')}.${dynamiteDate.getFullYear()}`),
+      isWeekly: true
+    });
+    dynamiteDate.setDate(dynamiteDate.getDate() + 7);
+    dynamiteNum++;
+  }
+  
+  // AEW Collision - Every Saturday
+  let collisionDate = getNextDayOfWeek(6); // Saturday = 6
+  let collisionNum = 121; // Start from a reasonable number
+  while (collisionDate <= oneMonthLater) {
+    weeklyShows.push({
+      id: `aew-collision-${collisionNum}`,
+      promotionId: '2287',
+      promotionName: 'All Elite Wrestling',
+      name: `AEW Collision #${collisionNum}`,
+      date: formatDateToReadable(`${collisionDate.getDate().toString().padStart(2, '0')}.${(collisionDate.getMonth() + 1).toString().padStart(2, '0')}.${collisionDate.getFullYear()}`),
+      isWeekly: true
+    });
+    collisionDate.setDate(collisionDate.getDate() + 7);
+    collisionNum++;
+  }
+  
+  // WWE Monday Night RAW - Every Monday
+  let rawDate = getNextDayOfWeek(1); // Monday = 1
+  let rawNum = 1696; // Start from a reasonable number
+  while (rawDate <= oneMonthLater) {
+    weeklyShows.push({
+      id: `wwe-raw-${rawNum}`,
+      promotionId: '1',
+      promotionName: 'World Wrestling Entertainment',
+      name: `WWE Monday Night RAW #${rawNum}`,
+      date: formatDateToReadable(`${rawDate.getDate().toString().padStart(2, '0')}.${(rawDate.getMonth() + 1).toString().padStart(2, '0')}.${rawDate.getFullYear()}`),
+      isWeekly: true
+    });
+    rawDate.setDate(rawDate.getDate() + 7);
+    rawNum++;
+  }
+  
+  // WWE Friday Night SmackDown - Every Friday
+  let smackdownDate = getNextDayOfWeek(5); // Friday = 5
+  let smackdownNum = 1371; // Start from a reasonable number
+  while (smackdownDate <= oneMonthLater) {
+    weeklyShows.push({
+      id: `wwe-smackdown-${smackdownNum}`,
+      promotionId: '1',
+      promotionName: 'World Wrestling Entertainment',
+      name: `WWE Friday Night SmackDown #${smackdownNum}`,
+      date: formatDateToReadable(`${smackdownDate.getDate().toString().padStart(2, '0')}.${(smackdownDate.getMonth() + 1).toString().padStart(2, '0')}.${smackdownDate.getFullYear()}`),
+      isWeekly: true
+    });
+    smackdownDate.setDate(smackdownDate.getDate() + 7);
+    smackdownNum++;
+  }
+  
+  // WWE NXT - Every Tuesday
+  let nxtDate = getNextDayOfWeek(2); // Tuesday = 2
+  let nxtNum = 813; // Start from a reasonable number
+  while (nxtDate <= oneMonthLater) {
+    weeklyShows.push({
+      id: `wwe-nxt-${nxtNum}`,
+      promotionId: '1',
+      promotionName: 'World Wrestling Entertainment',
+      name: `WWE NXT #${nxtNum}`,
+      date: formatDateToReadable(`${nxtDate.getDate().toString().padStart(2, '0')}.${(nxtDate.getMonth() + 1).toString().padStart(2, '0')}.${nxtDate.getFullYear()}`),
+      isWeekly: true
+    });
+    nxtDate.setDate(nxtDate.getDate() + 7);
+    nxtNum++;
+  }
+  
+  return weeklyShows;
+}
+
+// Scrape upcoming weekly shows specifically
+// Note: The main page shows recent events (both past and upcoming)
+// We'll generate future weekly shows and combine with scraped ones
+async function scrapeUpcomingWeeklyShows() {
+  console.log('🔍 Generating future weekly shows...');
+  
+  // Generate future weekly shows
+  const generatedShows = generateFutureWeeklyShows();
+  console.log(`✅ Generated ${generatedShows.length} future weekly shows`);
+  
+  try {
+    // Also scrape from Cagematch to get any announced weekly shows
+    const url = 'https://www.cagematch.net/?id=1';
+    console.log(`📡 Fetching: ${url}`);
+    const html = await fetchHTML(url);
+    
+    await delay(DELAY_MS); // Be respectful
+    
+    const results = parseHTML(html);
+    const events = results.events;
+    
+    console.log(`✅ Found ${events.length} total events from Cagematch`);
+    
+    // Filter for major promotions only
+    const majorPromoIds = ['1', '2287', '7', '5', '122']; // WWE, AEW, NJPW, TNA, ROH
+    const majorEvents = events.filter(e => 
+      majorPromoIds.includes(e.promotionId) ||
+      e.promotionName?.toUpperCase().includes('WWE') ||
+      e.promotionName?.toUpperCase().includes('AEW') ||
+      e.promotionName?.toUpperCase().includes('NJPW') ||
+      e.promotionName?.toUpperCase().includes('TNA') ||
+      e.promotionName?.toUpperCase().includes('ROH')
+    );
+    
+    // Filter for weekly shows only (not PPVs)
+    const scrapedWeeklyShows = majorEvents.filter(e => {
+      const isWeekly = !isPPVEvent(e.name);
+      return isWeekly && e.date; // Must have a date
+    });
+    
+    console.log(`📺 Found ${scrapedWeeklyShows.length} weekly shows from Cagematch`);
+    
+    // Combine generated and scraped shows, removing duplicates by name similarity
+    const allShows = [...generatedShows];
+    const generatedNames = new Set(generatedShows.map(s => s.name.toLowerCase().replace(/#\d+/g, '').trim()));
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    scrapedWeeklyShows.forEach(scraped => {
+      const normalizedName = scraped.name.toLowerCase().replace(/#\d+/g, '').trim();
+      // Only add if it's not a duplicate and is in the future
+      if (!generatedNames.has(normalizedName)) {
+        const [day, month, year] = scraped.date.split('.').map(Number);
+        const eventDate = new Date(year, month - 1, day);
+        eventDate.setHours(0, 0, 0, 0);
+        if (eventDate >= today) {
+          allShows.push({
+            id: scraped.id,
+            promotionId: scraped.promotionId,
+            promotionName: scraped.promotionName,
+            name: scraped.name,
+            date: formatDateToReadable(scraped.date),
+            isWeekly: true
+          });
+        }
+      }
+    });
+    
+    console.log(`📺 Total weekly shows: ${allShows.length}`);
+    
+    // Log which shows we found (limit to first 10 for readability)
+    allShows.slice(0, 10).forEach(show => {
+      console.log(`  • ${show.promotionName}: ${show.name} (${show.date})`);
+    });
+    if (allShows.length > 10) {
+      console.log(`  ... and ${allShows.length - 10} more`);
+    }
+    
+    return allShows;
+  } catch (error) {
+    console.error(`❌ Error scraping weekly shows:`, error.message);
+    // Return generated shows even if scraping fails
+    return generatedShows;
+  }
+}
+
 // Helper to check if event name looks like a PPV (not a weekly show)
 function isPPVEvent(eventName) {
+  // First check for known PPV names that might match weekly patterns
+  const ppvExceptions = [
+    /saturday\s*night'?s\s*main\s*event/i, // This is a PPV, not weekly
+    /world\s*tag\s*league\s*finals/i, // NJPW PPV
+  ];
+  if (ppvExceptions.some(pattern => pattern.test(eventName))) {
+    return true; // It's a PPV
+  }
+  
   const weeklyPatterns = [
     /dynamite/i,
     /collision/i,
@@ -286,7 +486,6 @@ function isPPVEvent(eventName) {
     /\braw\b/i,
     /smackdown/i,
     /\bnxt\b(?!\s*(takeover|stand|deliver|deadline|vengeance|battleground))/i,
-    /main\s*event/i,
     /superstars/i,
     /thunder/i,
     /nitro/i,
@@ -327,19 +526,6 @@ function getKnownUpcomingPPVs() {
         { id: 3, p1: 'Cody Rhodes', p2: 'Kevin Owens', title: 'Undisputed WWE Championship' },
         { id: 4, p1: 'Gunther', p2: 'Damian Priest', title: 'World Heavyweight Championship' },
         { id: 5, p1: 'LA Knight', p2: 'Shinsuke Nakamura', title: 'United States Championship' }
-      ]
-    },
-    { 
-      id: 'wwe-saturday-nights-main-event-dec-2025', 
-      name: "Saturday Night's Main Event", 
-      promotionId: '1', 
-      promotionName: 'WWE', 
-      date: 'Dec 14, 2025', 
-      venue: 'Nassau Coliseum, Uniondale, NY', 
-      isPPV: true,
-      matches: [
-        { id: 1, p1: 'Cody Rhodes', p2: 'Kevin Owens', title: 'Undisputed WWE Championship' },
-        { id: 2, p1: 'Gunther', p2: 'Jey Uso', title: 'World Heavyweight Championship' }
       ]
     },
     { 
@@ -833,6 +1019,12 @@ function parseEventDetails(html) {
 }
 
 async function scrapeEventDetails(event) {
+  // If event doesn't have a cagematchEventId (like generated weekly shows), skip scraping
+  if (!event.cagematchEventId) {
+    console.log(`⏭️  Skipping detail scrape for ${event.name} (no Cagematch ID - likely generated)`);
+    return event; // Return as-is
+  }
+  
   console.log(`🔍 Scraping details for ${event.name}...`);
   
   try {
@@ -889,23 +1081,34 @@ async function main() {
     writeFileSync(join(__dirname, '../data/upcoming-ppvs.json'), JSON.stringify(upcomingPPVs, null, 2));
     console.log(`💾 Saved ${upcomingPPVs.length} upcoming PPVs to data/upcoming-ppvs.json`);
     
-    // Combine all events (recent + upcoming PPVs, removing duplicates)
+    // Step 4: Scrape upcoming weekly shows
+    console.log('\n');
+    const weeklyShows = await scrapeUpcomingWeeklyShows();
+    
+    writeFileSync(join(__dirname, '../data/weekly-shows.json'), JSON.stringify(weeklyShows, null, 2));
+    console.log(`💾 Saved ${weeklyShows.length} weekly shows to data/weekly-shows.json`);
+    
+    // Combine all events (recent + upcoming PPVs + weekly shows, removing duplicates)
+    // Also filter out "Saturday Night's Main Event" as requested
     const allEventsMap = new Map();
-    [...recentEvents, ...upcomingPPVs].forEach(event => {
-      allEventsMap.set(event.id, event);
-    });
+    [...recentEvents, ...upcomingPPVs, ...weeklyShows]
+      .filter(event => !/saturday\s*night'?s\s*main\s*event/i.test(event.name))
+      .forEach(event => {
+        allEventsMap.set(event.id, event);
+      });
     const allEvents = Array.from(allEventsMap.values());
     
     console.log(`\n📊 Total unique events: ${allEvents.length}`);
     
-    // Step 4: Scrape details for events and save to Firestore
+    // Step 5: Scrape details for events and save to Firestore
     console.log('\n🔍 Scraping event details and match cards...\n');
     const eventsWithDetails = [];
     
-    // Prioritize upcoming PPVs, then recent events (limit to 20 total)
+    // Prioritize upcoming PPVs, then weekly shows, then recent events (limit to 30 total)
     const eventsToScrape = [
-      ...upcomingPPVs.slice(0, 15), // First 15 upcoming PPVs
-      ...recentEvents.slice(0, 10)  // Plus 10 recent events
+      ...upcomingPPVs.slice(0, 10), // First 10 upcoming PPVs
+      ...weeklyShows.slice(0, 15),   // Next 15 weekly shows
+      ...recentEvents.slice(0, 10)   // Plus 10 recent events
     ];
     
     // Deduplicate
@@ -914,7 +1117,7 @@ async function main() {
       if (seenIds.has(e.id)) return false;
       seenIds.add(e.id);
       return true;
-    }).slice(0, 20); // Max 20
+    }).slice(0, 30); // Max 30 (increased to include weekly shows)
     
     for (let i = 0; i < uniqueEventsToScrape.length; i++) {
       const event = uniqueEventsToScrape[i];
