@@ -1812,9 +1812,14 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                       </div>
                     )}
                     
-                    {actualWinner && (
+                    {actualWinner && myPick && (
                       <div className={`mt-2 text-center text-xs font-bold uppercase tracking-wider p-2 rounded-lg border ${isCorrect ? 'bg-green-900/20 border-green-900 text-green-400' : 'bg-red-900/20 border-red-900 text-red-400'}`}>
                         {isCorrect ? '+10 POINTS' : 'INCORRECT'}
+                      </div>
+                    )}
+                    {actualWinner && !myPick && (
+                      <div className="mt-2 text-center text-xs font-bold uppercase tracking-wider p-2 rounded-lg border bg-slate-800/50 border-slate-700 text-slate-500">
+                        NO PREDICTION MADE
                       </div>
                     )}
                   </div>
