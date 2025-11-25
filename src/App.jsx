@@ -329,6 +329,22 @@ export default function RingsidePickemFinal() {
   
   // Use ref to track current user ID - this won't cause re-renders and is always current
   const currentUserIdRef = useRef(null);
+  
+  // Track previous user ID to detect changes
+  const previousUserIdRef = useRef(null);
+  
+  // CRITICAL: Extra safety - clear ALL user data when user ID changes
+  useEffect(() => {
+    if (user?.uid !== previousUserIdRef.current) {
+      console.log('🔄 User ID changed:', previousUserIdRef.current, '->', user?.uid);
+      // Force clear all user-specific state
+      setPredictions({});
+      setCommunitySentiment({});
+      setSelectedMethod({});
+      setPredictionsUserId(null);
+      previousUserIdRef.current = user?.uid || null;
+    }
+  }, [user?.uid]);
 
   // --- AUTH & INIT ---
   useEffect(() => {
@@ -1673,7 +1689,12 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
               {selectedEvent.matches.map((match) => {
                 // CRITICAL: Only show predictions if they belong to the current user
                 // Must be exact match - null means we haven't loaded predictions yet, so don't show any
-                const predictionsBelongToCurrentUser = predictionsUserId === user?.uid && predictionsUserId !== null && user?.uid !== null;
+                // Also check that predictions object has entries for this user (extra safety)
+                const predictionsBelongToCurrentUser = 
+                  predictionsUserId === user?.uid && 
+                  predictionsUserId !== null && 
+                  user?.uid !== null &&
+                  currentUserIdRef.current === user?.uid; // Extra check using ref
                 
                 // Log what we're seeing for debugging
                 if (predictions[selectedEvent.id]?.[match.id]) {
