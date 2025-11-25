@@ -1162,9 +1162,23 @@ export default function RingsidePickemFinal() {
     });
     
     // Then filter by event type (PPV or Weekly)
-    return subscribedEvents.filter(ev => {
+    const filteredEvents = subscribedEvents.filter(ev => {
       const isWeekly = isWeeklyShow(ev.name);
       return eventTypeFilter === 'weekly' ? isWeekly : !isWeekly;
+    });
+    
+    // Sort by date (upcoming first)
+    // Date format: DD.MM.YYYY
+    return filteredEvents.sort((a, b) => {
+      const parseDate = (dateStr) => {
+        if (!dateStr) return new Date(9999, 11, 31); // Put events without dates at the end
+        const parts = dateStr.split('.');
+        if (parts.length === 3) {
+          return new Date(parts[2], parts[1] - 1, parts[0]);
+        }
+        return new Date(dateStr);
+      };
+      return parseDate(a.date) - parseDate(b.date);
     });
   }, [userProfile, scrapedEvents, eventTypeFilter]);
 

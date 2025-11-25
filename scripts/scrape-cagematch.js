@@ -277,6 +277,95 @@ async function scrapeRecentEvents() {
   }
 }
 
+// Helper to check if event name looks like a PPV (not a weekly show)
+function isPPVEvent(eventName) {
+  const weeklyPatterns = [
+    /dynamite/i,
+    /collision/i,
+    /rampage/i,
+    /\braw\b/i,
+    /smackdown/i,
+    /\bnxt\b(?!\s*(takeover|stand|deliver|deadline|vengeance|battleground))/i,
+    /main\s*event/i,
+    /superstars/i,
+    /thunder/i,
+    /nitro/i,
+    /\bimpact\b(?!\s*(slammiversary|bound|hard|sacrifice|rebellion|against|genesis))/i,
+    /\bdark\b(?:\s|$)/i,
+    /elevation/i,
+    /\bstrong\b/i,
+    /road\s*to/i,
+    /house\s*show/i,
+    /live\s*event/i,
+  ];
+  
+  return !weeklyPatterns.some(pattern => pattern.test(eventName));
+}
+
+// Known upcoming PPVs for the next 3 months (updated regularly)
+// These are announced well in advance by promotions
+function getKnownUpcomingPPVs() {
+  const today = new Date();
+  const threeMonthsLater = new Date();
+  threeMonthsLater.setMonth(threeMonthsLater.getMonth() + 3);
+  
+  // Define known PPVs with their dates (Nov 2025 - Feb 2026)
+  const knownPPVs = [
+    // WWE PPVs
+    { id: 'wwe-survivor-series-2025', name: 'Survivor Series: WarGames 2025', promotionId: '1', promotionName: 'WWE', date: '30.11.2025', venue: 'Rogers Arena, Vancouver, Canada', isPPV: true },
+    { id: 'wwe-saturday-nights-main-event-dec-2025', name: "Saturday Night's Main Event", promotionId: '1', promotionName: 'WWE', date: '14.12.2025', venue: 'Nassau Coliseum, Uniondale, NY', isPPV: true },
+    { id: 'wwe-royal-rumble-2026', name: 'Royal Rumble 2026', promotionId: '1', promotionName: 'WWE', date: '25.01.2026', venue: 'Lucas Oil Stadium, Indianapolis, IN', isPPV: true },
+    { id: 'wwe-elimination-chamber-2026', name: 'Elimination Chamber 2026', promotionId: '1', promotionName: 'WWE', date: '15.02.2026', venue: 'TBD', isPPV: true },
+    
+    // AEW PPVs
+    { id: 'aew-worlds-end-2025', name: 'Worlds End 2025', promotionId: '2287', promotionName: 'AEW', date: '28.12.2025', venue: 'Addition Financial Arena, Orlando, FL', isPPV: true },
+    { id: 'aew-revolution-2026', name: 'Revolution 2026', promotionId: '2287', promotionName: 'AEW', date: '08.03.2026', venue: 'TBD', isPPV: true },
+    
+    // NJPW PPVs
+    { id: 'njpw-world-tag-league-finals-2025', name: 'World Tag League Finals 2025', promotionId: '7', promotionName: 'NJPW', date: '15.12.2025', venue: 'Sendai Sun Plaza Hall, Sendai, Japan', isPPV: true },
+    { id: 'njpw-wrestle-kingdom-20', name: 'Wrestle Kingdom 20', promotionId: '7', promotionName: 'NJPW', date: '04.01.2026', venue: 'Tokyo Dome, Tokyo, Japan', isPPV: true },
+    { id: 'njpw-new-year-dash-2026', name: 'New Year Dash 2026', promotionId: '7', promotionName: 'NJPW', date: '05.01.2026', venue: 'Ota City General Gymnasium, Tokyo, Japan', isPPV: true },
+    { id: 'njpw-new-beginning-osaka-2026', name: 'The New Beginning in Osaka 2026', promotionId: '7', promotionName: 'NJPW', date: '11.02.2026', venue: 'Osaka-jo Hall, Osaka, Japan', isPPV: true },
+    
+    // TNA PPVs
+    { id: 'tna-turning-point-2025', name: 'Turning Point 2025', promotionId: '5', promotionName: 'TNA', date: '29.11.2025', venue: 'TBD', isPPV: true },
+    { id: 'tna-final-resolution-2025', name: 'Final Resolution 2025', promotionId: '5', promotionName: 'TNA', date: '13.12.2025', venue: 'TBD', isPPV: true },
+    { id: 'tna-hard-to-kill-2026', name: 'Hard to Kill 2026', promotionId: '5', promotionName: 'TNA', date: '11.01.2026', venue: 'Center Stage, Atlanta, GA', isPPV: true },
+    { id: 'tna-genesis-2026', name: 'Genesis 2026', promotionId: '5', promotionName: 'TNA', date: '19.01.2026', venue: 'TBD', isPPV: true },
+    { id: 'tna-no-surrender-2026', name: 'No Surrender 2026', promotionId: '5', promotionName: 'TNA', date: '21.02.2026', venue: 'TBD', isPPV: true },
+    
+    // ROH PPVs
+    { id: 'roh-final-battle-2025', name: 'Final Battle 2025', promotionId: '122', promotionName: 'ROH', date: '20.12.2025', venue: 'Hammerstein Ballroom, New York, NY', isPPV: true },
+    { id: 'roh-supercard-of-honor-2026', name: 'Supercard of Honor 2026', promotionId: '122', promotionName: 'ROH', date: '28.02.2026', venue: 'TBD', isPPV: true },
+  ];
+  
+  // Filter to only include PPVs within the next 3 months
+  return knownPPVs.filter(ppv => {
+    const [day, month, year] = ppv.date.split('.');
+    const ppvDate = new Date(year, month - 1, day);
+    return ppvDate >= today && ppvDate <= threeMonthsLater;
+  }).map(ppv => ({
+    ...ppv,
+    cagematchEventId: null, // Will be scraped if found
+    slug: ppv.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+  }));
+}
+
+async function scrapeUpcomingPPVs() {
+  console.log('🔍 Getting upcoming PPVs...\n');
+  
+  // Get known upcoming PPVs
+  const knownPPVs = getKnownUpcomingPPVs();
+  console.log(`📅 Found ${knownPPVs.length} known upcoming PPVs\n`);
+  
+  // List them
+  knownPPVs.forEach(ppv => {
+    console.log(`  • ${ppv.promotionName}: ${ppv.name} (${ppv.date})`);
+  });
+  
+  return knownPPVs;
+}
+
 function parseEventDetails(html) {
   const details = {
     date: null,
@@ -509,17 +598,47 @@ async function main() {
     await delay(DELAY_MS);
     
     // Step 2: Scrape recent events from main page
-    const allEvents = await scrapeRecentEvents();
+    const recentEvents = await scrapeRecentEvents();
     
-    writeFileSync(join(__dirname, '../data/events.json'), JSON.stringify(allEvents, null, 2));
-    console.log(`💾 Saved ${allEvents.length} events to data/events.json`);
+    writeFileSync(join(__dirname, '../data/events.json'), JSON.stringify(recentEvents, null, 2));
+    console.log(`💾 Saved ${recentEvents.length} recent events to data/events.json`);
     
-    // Step 3: Scrape details for all events and save to Firestore
+    // Step 3: Scrape upcoming PPVs for the next 3 months
+    console.log('\n');
+    const upcomingPPVs = await scrapeUpcomingPPVs();
+    
+    writeFileSync(join(__dirname, '../data/upcoming-ppvs.json'), JSON.stringify(upcomingPPVs, null, 2));
+    console.log(`💾 Saved ${upcomingPPVs.length} upcoming PPVs to data/upcoming-ppvs.json`);
+    
+    // Combine all events (recent + upcoming PPVs, removing duplicates)
+    const allEventsMap = new Map();
+    [...recentEvents, ...upcomingPPVs].forEach(event => {
+      allEventsMap.set(event.id, event);
+    });
+    const allEvents = Array.from(allEventsMap.values());
+    
+    console.log(`\n📊 Total unique events: ${allEvents.length}`);
+    
+    // Step 4: Scrape details for events and save to Firestore
     console.log('\n🔍 Scraping event details and match cards...\n');
     const eventsWithDetails = [];
     
-    for (let i = 0; i < Math.min(allEvents.length, 10); i++) { // Limit to 10 for testing
-      const event = allEvents[i];
+    // Prioritize upcoming PPVs, then recent events (limit to 20 total)
+    const eventsToScrape = [
+      ...upcomingPPVs.slice(0, 15), // First 15 upcoming PPVs
+      ...recentEvents.slice(0, 10)  // Plus 10 recent events
+    ];
+    
+    // Deduplicate
+    const seenIds = new Set();
+    const uniqueEventsToScrape = eventsToScrape.filter(e => {
+      if (seenIds.has(e.id)) return false;
+      seenIds.add(e.id);
+      return true;
+    }).slice(0, 20); // Max 20
+    
+    for (let i = 0; i < uniqueEventsToScrape.length; i++) {
+      const event = uniqueEventsToScrape[i];
       const eventDetails = await scrapeEventDetails(event);
       eventsWithDetails.push(eventDetails);
       
@@ -530,6 +649,7 @@ async function main() {
             doc(db, 'artifacts', appId, 'public', 'data', 'events', eventDetails.id),
             {
               ...eventDetails,
+              isPPV: event.isPPV || isPPVEvent(event.name),
               updatedAt: new Date().toISOString(),
               scrapedAt: new Date().toISOString()
             },
