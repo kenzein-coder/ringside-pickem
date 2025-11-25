@@ -1290,7 +1290,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                    <Trophy className="text-white w-12 h-12" />
                 </div>
                 <div>
-                   <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase mb-2">PRO<span className="text-red-600">PICK'EM</span></h1>
+                   <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase mb-2">RINGSIDE <span className="text-red-600">PICK'EM</span></h1>
                    <p className="text-slate-400 max-w-xs mx-auto text-sm leading-relaxed">Predict winners. Climb ranks. Become a legend.</p>
                 </div>
             </div>
@@ -1602,7 +1602,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
         <div className="max-w-md mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2" onClick={() => setActiveTab('home')}>
             <Trophy className="text-red-600 w-5 h-5" />
-            <span className="font-black text-lg tracking-tighter italic text-white">PRO<span className="text-red-600">PICK'EM</span></span>
+            <span className="font-black text-lg tracking-tighter italic text-white">RINGSIDE <span className="text-red-600">PICK'EM</span></span>
           </div>
           <div className="flex items-center gap-3">
              <div className="bg-slate-800 px-3 py-1 rounded text-xs font-mono font-bold text-white border border-slate-700">{userProfile?.totalPoints || 0} PTS</div>
