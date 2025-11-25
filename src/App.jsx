@@ -86,47 +86,9 @@ try {
   console.error('❌ Firebase initialization error:', error);
   firebaseError = error.message;
 }
-// Use Firebase project ID from config - throw error if missing
-if (!firebaseConfig.projectId) {
-  throw new Error('Firebase project ID is required. Set VITE_FIREBASE_PROJECT_ID in your .env file.');
-}
-const appId = firebaseConfig.projectId;
+// Use Firebase project ID from config, fall back to __app_id or default
+const appId = firebaseConfig.projectId || (typeof __app_id !== 'undefined' ? __app_id : 'default-app-id');
 const googleProvider = new GoogleAuthProvider();
-
-// Helper function for development-only logging
-const devLog = (...args) => {
-  if (process.env.NODE_ENV === 'development') {
-    console.log(...args);
-  }
-};
-
-const devWarn = (...args) => {
-  if (process.env.NODE_ENV === 'development') {
-    console.warn(...args);
-  }
-};
-
-// Constants for view states and other magic strings
-const VIEW_STATES = {
-  LOADING: 'loading',
-  LOGIN: 'login',
-  ONBOARDING: 'onboarding',
-  DASHBOARD: 'dashboard'
-};
-
-const EVENT_TYPES = {
-  PPV: 'ppv',
-  WEEKLY: 'weekly',
-  PAST: 'past'
-};
-
-const LEADERBOARD_SCOPES = {
-  GLOBAL: 'global',
-  COUNTRY: 'country',
-  REGION: 'region',
-  FRIENDS: 'friends'
-};
-
 // Configure Google provider to always show account selection
 googleProvider.setCustomParameters({
   prompt: 'select_account'
@@ -179,7 +141,7 @@ const searchWikimediaCommonsForLogo = async (promotionName) => {
       }
     }
   } catch (error) {
-    devLog(`Wikimedia logo search failed for ${promotionName}:`, error);
+    console.log(`Wikimedia logo search failed for ${promotionName}:`, error);
   }
   
   // Cache null result to avoid repeated failed searches
@@ -221,7 +183,7 @@ const searchWikimediaCommons = async (wrestlerName) => {
       }
     }
   } catch (error) {
-    devLog(`Wikimedia search failed for ${wrestlerName}:`, error);
+    console.log(`Wikimedia search failed for ${wrestlerName}:`, error);
   }
   
   // Cache null result to avoid repeated failed searches
@@ -317,7 +279,7 @@ const saveImageToFirestore = async (type, identifier, imageUrl) => {
       updatedAt: serverTimestamp()
     }, { merge: true });
   } catch (error) {
-    devLog(`Failed to save image to Firestore:`, error);
+    console.log(`Failed to save image to Firestore:`, error);
   }
 };
 
@@ -334,7 +296,7 @@ const getImageFromFirestore = async (type, identifier) => {
       return data[identifier] || null;
     }
   } catch (error) {
-    devLog(`Failed to get image from Firestore:`, error);
+    console.log(`Failed to get image from Firestore:`, error);
   }
   
   return null;
@@ -484,7 +446,7 @@ const searchPromotionLogo = async (promotionId, promotionName) => {
       return wikimediaUrl;
     }
   } catch (error) {
-        devLog(`Wikimedia search failed for ${promotionName}`);
+    console.log(`Wikimedia search failed for ${promotionName}`);
   }
   
   // Try original Wikimedia Commons search as fallback
@@ -495,7 +457,7 @@ const searchPromotionLogo = async (promotionId, promotionName) => {
       return wikimediaUrl;
     }
   } catch (error) {
-        devLog(`Wikimedia search failed for ${promotionName}`);
+    console.log(`Wikimedia search failed for ${promotionName}`);
   }
   
   // Try Wikipedia API search with variations
@@ -525,7 +487,7 @@ const searchPromotionLogo = async (promotionId, promotionName) => {
       }
     }
   } catch (error) {
-        devLog(`Wikipedia API search failed for ${promotionName}`);
+    console.log(`Wikipedia API search failed for ${promotionName}`);
   }
   
   // Try Wikipedia infobox extraction
@@ -615,7 +577,7 @@ const searchWrestlerImage = async (wrestlerName) => {
       return wikimediaUrl;
     }
   } catch (error) {
-        devLog(`Wikimedia search failed for ${wrestlerName}`);
+    console.log(`Wikimedia search failed for ${wrestlerName}`);
   }
   
   // Try Wikipedia API search
@@ -647,7 +609,7 @@ const searchWrestlerImage = async (wrestlerName) => {
       }
     }
   } catch (error) {
-        devLog(`Wikipedia API search failed for ${wrestlerName}`);
+    console.log(`Wikipedia API search failed for ${wrestlerName}`);
   }
   
   // Try Wikipedia infobox extraction
@@ -732,7 +694,7 @@ const searchWikimediaCommonsForEvent = async (eventName) => {
       }
     }
   } catch (error) {
-        devLog(`Wikimedia event search failed for ${eventName}:`, error);
+    console.log(`Wikimedia event search failed for ${eventName}:`, error);
   }
   
   return null;
@@ -778,7 +740,7 @@ const searchEventPoster = async (eventId, eventName) => {
       return wikimediaUrl;
     }
   } catch (error) {
-        devLog(`Wikimedia search failed for ${eventName}`);
+    console.log(`Wikimedia search failed for ${eventName}`);
   }
   
   // PRIORITY 4: Try Wikipedia API search with more variations
@@ -823,7 +785,7 @@ const searchEventPoster = async (eventId, eventName) => {
       }
     }
   } catch (error) {
-        devLog(`Wikipedia API search failed for ${eventName}`);
+    console.log(`Wikipedia API search failed for ${eventName}`);
   }
   
   // PRIORITY 5: Try Wikipedia infobox extraction
@@ -896,37 +858,6 @@ const KNOWN_EVENT_POSTERS = {
   // Example: 'wwe-wrestlemania-40': 'https://upload.wikimedia.org/...'
 };
 
-// Helper function to determine if an event is a weekly show (used for PPV detection)
-const isWeeklyShowCheck = (eventName) => {
-  // First check for known PPV names that might match weekly patterns
-  const ppvExceptions = [
-    /saturday\s*night'?s\s*main\s*event/i, // This is a PPV, not weekly
-    /world\s*tag\s*league\s*finals/i, // NJPW PPV
-  ];
-  if (ppvExceptions.some(pattern => pattern.test(eventName))) {
-    return false; // It's a PPV, not a weekly show
-  }
-  
-  const weeklyPatterns = [
-    /dynamite/i,
-    /collision/i,
-    /rampage/i,
-    /raw/i,
-    /smackdown/i,
-    /nxt(?!\s*(takeover|stand|deliver|deadline|vengeance|battleground))/i,
-    /superstars/i,
-    /thunder/i,
-    /nitro/i,
-    /impact(?!\s*(slammiversary|bound|hard|sacrifice|rebellion|against|genesis))/i,
-    /dark(?:\s|$)/i,
-    /elevation/i,
-    /strong/i,
-    /road\s*to/i,
-  ];
-  
-  return weeklyPatterns.some(pattern => pattern.test(eventName));
-};
-
 // Helper function to get event poster/banner with fallback
 const getEventImage = async (event) => {
   if (!event) return null;
@@ -955,40 +886,7 @@ const getEventImage = async (event) => {
     return foundUrl;
   }
   
-  // For PPVs without a poster, fall back to promotion logo/banner
-  const isWeekly = isWeeklyShowCheck(event.name);
-  const isPPV = !isWeekly || event.isPPV === true;
-  
-  if (isPPV && (event.promotionId || event.promoId)) {
-    // Try to get promotion logo as fallback
-    const promotionId = event.promotionId || 
-      (event.promoId === 'wwe' ? '1' :
-       event.promoId === 'aew' ? '2287' :
-       event.promoId === 'njpw' ? '7' :
-       event.promoId === 'tna' ? '5' :
-       event.promoId === 'roh' ? '122' : null);
-    
-    const promotionName = event.promotionName || 
-      (event.promoId === 'wwe' ? 'WWE' :
-       event.promoId === 'aew' ? 'AEW' :
-       event.promoId === 'njpw' ? 'NJPW' :
-       event.promoId === 'tna' ? 'TNA' :
-       event.promoId === 'roh' ? 'ROH' : null);
-    
-    if (promotionId && promotionName) {
-      try {
-        const promotionLogo = await searchPromotionLogo(promotionId, promotionName);
-        if (promotionLogo) {
-          // Use promotion logo as fallback for PPV
-          return promotionLogo;
-        }
-      } catch (error) {
-        devLog(`Failed to load promotion logo for ${event.name}:`, error);
-      }
-    }
-  }
-  
-  // Final fallback to placeholder
+  // Fallback to placeholder
   return `https://picsum.photos/seed/${event.id}/800/400`;
 };
 
@@ -1290,7 +1188,7 @@ const BrandLogo = ({ id, className = "w-full h-full object-contain", logoUrl }) 
           return;
         }
       } catch (error) {
-        devLog(`Firestore lookup failed for ${id}`);
+        console.log(`Firestore lookup failed for ${id}`);
       }
       
       // Step 3: Check hardcoded PROMOTION_LOGOS
@@ -1315,7 +1213,7 @@ const BrandLogo = ({ id, className = "w-full h-full object-contain", logoUrl }) 
           return;
         }
       } catch (error) {
-        devLog(`Logo search failed for ${id}`);
+        console.log(`Logo search failed for ${id}`);
       }
       
       // Step 5: No logo found - will use fallback
@@ -1414,7 +1312,7 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
           return;
         }
       } catch (error) {
-        devLog(`Firestore lookup failed for ${name}`);
+        console.log(`Firestore lookup failed for ${name}`);
       }
       
       // Step 3: Check hardcoded WRESTLER_IMAGES
@@ -1436,7 +1334,7 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
           return;
         }
       } catch (error) {
-        devLog(`Image search failed for ${name}`);
+        console.log(`Image search failed for ${name}`);
       }
       
       // Step 5: No image found - will use fallback
@@ -1522,25 +1420,11 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
   );
 };
 
-const Toggle = React.memo(({ enabled, onClick, ariaLabel = 'Toggle' }) => (
-  <div 
-    onClick={onClick}
-    onKeyDown={(e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        onClick();
-      }
-    }}
-    role="switch"
-    aria-checked={enabled}
-    aria-label={ariaLabel}
-    tabIndex={0}
-    className={`w-12 h-6 rounded-full p-1 cursor-pointer transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-slate-950 ${enabled ? 'bg-red-600' : 'bg-slate-700'}`}
-  >
+const Toggle = ({ enabled, onClick }) => (
+  <div onClick={onClick} className={`w-12 h-6 rounded-full p-1 cursor-pointer transition-colors duration-200 ${enabled ? 'bg-red-600' : 'bg-slate-700'}`}>
     <div className={`bg-white w-4 h-4 rounded-full shadow-md transform duration-200 ${enabled ? 'translate-x-6' : 'translate-x-0'}`} />
   </div>
-));
-Toggle.displayName = 'Toggle';
+);
 
 // Event Banner/Poster Component - handles loading event images with fallbacks
 const EventBanner = ({ event, className = "w-full h-full object-cover", fallbackClassName }) => {
@@ -1559,7 +1443,7 @@ const EventBanner = ({ event, className = "w-full h-full object-cover", fallback
         const imageUrl = await getEventImage(event);
         setCurrentImageUrl(imageUrl);
       } catch (error) {
-        devLog(`Failed to load event image for ${event.name}:`, error);
+        console.log(`Failed to load event image for ${event.name}:`, error);
         setHasError(true);
         setCurrentImageUrl(`https://picsum.photos/seed/${event.id}/800/400`);
       } finally {
@@ -1602,14 +1486,13 @@ export default function RingsidePickemFinal() {
   const [authLoading, setAuthLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
-  const [viewState, setViewState] = useState(VIEW_STATES.LOADING);
+  const [viewState, setViewState] = useState('loading'); // loading, login, onboarding, dashboard
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false); // For onboarding submission
   
   // Account creation/login state
-  const AUTH_MODES = { GUEST: 'guest', SIGNIN: 'signin', SIGNUP: 'signup' };
-  const [authMode, setAuthMode] = useState(AUTH_MODES.GUEST);
+  const [authMode, setAuthMode] = useState('guest'); // 'guest', 'signin', 'signup'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -1628,7 +1511,7 @@ export default function RingsidePickemFinal() {
   const [tempSubs, setTempSubs] = useState(['wwe', 'aew', 'njpw']);
 
   // Data State
-  const [leaderboardScope, setLeaderboardScope] = useState(LEADERBOARD_SCOPES.GLOBAL);
+  const [leaderboardScope, setLeaderboardScope] = useState('global');
   const [leaderboard, setLeaderboard] = useState([]);
   // CRITICAL: Store predictions keyed by user ID to prevent cross-contamination
   // Structure: { [userId]: { [eventId]: { [matchId]: prediction } } }
@@ -1640,8 +1523,7 @@ export default function RingsidePickemFinal() {
   const [communitySentiment, setCommunitySentiment] = useState({}); // { eventId: { matchId: { p1: 65, p2: 35 } } }
   const [selectedMethod, setSelectedMethod] = useState({}); // { eventId-matchId: 'pinfall' }
   const [predictionsUserId, setPredictionsUserId] = useState(null); // Track which user's predictions we're showing
-  const [predictionsLoading, setPredictionsLoading] = useState(true); // Block display until we confirm predictions belong to current user
-  const [eventTypeFilter, setEventTypeFilter] = useState(EVENT_TYPES.PPV);
+  const [eventTypeFilter, setEventTypeFilter] = useState('ppv'); // 'ppv', 'weekly', or 'past'
   
   // Use ref to track current user ID - this won't cause re-renders and is always current
   const currentUserIdRef = useRef(null);
@@ -1653,111 +1535,68 @@ export default function RingsidePickemFinal() {
   // CRITICAL: Use currentUserIdRef to ensure we always get the correct user's predictions
   // This prevents stale user state from causing cross-contamination
   const getCurrentUserPredictions = () => {
-    // CRITICAL: Always use user.uid directly, never from refs which might be stale
-    if (!user || !user.uid) return {};
-    const currentUserId = user.uid;
-    
-    // CRITICAL: Validate that we're accessing the correct user's predictions
-    if (predictionsUserId !== null && predictionsUserId !== currentUserId) {
-      console.error('🔒 CRITICAL: predictionsUserId mismatch in getCurrentUserPredictions!', {
-        predictionsUserId,
-        actualUserId: currentUserId
-      });
-      return {}; // Return empty if mismatch
-    }
-    
+    const currentUserId = currentUserIdRef.current || user?.uid;
+    if (!currentUserId) return {};
     return predictionsByUser[currentUserId] || {};
   };
   
+  // Helper to set current user's predictions
+  // CRITICAL: Use currentUserIdRef to ensure we always set for the correct user
+  // This prevents stale user state from causing cross-contamination
+  const setCurrentUserPredictions = (newPredictions) => {
+    const currentUserId = currentUserIdRef.current || user?.uid;
+    if (!currentUserId) {
+      console.error('🔒 Cannot set predictions - no current user ID');
+      return;
+    }
+    setPredictionsByUser(prev => {
+      // Final safety check - verify the user ID matches
+      if (currentUserIdRef.current !== currentUserId) {
+        console.error('🔒 CRITICAL: User ID mismatch in setCurrentUserPredictions!', {
+          refUserId: currentUserIdRef.current,
+          expectedUserId: currentUserId
+        });
+        return prev; // Don't update if user changed
+      }
+      return {
+        ...prev,
+        [currentUserId]: newPredictions
+      };
+    });
+  };
+  
   // Clear ALL user data when user ID changes - MUST happen first
-  // This runs BEFORE any listeners are set up to ensure clean state
   useEffect(() => {
     if (user?.uid !== previousUserIdRef.current) {
       const previousUserId = previousUserIdRef.current;
       const newUserId = user?.uid;
       
-      devLog('🔄 USER CHANGED: Clearing ALL predictions state IMMEDIATELY');
-      devLog('   Previous User:', previousUserId || '(none)');
-      devLog('   New User:', newUserId || '(none)');
-      devLog('   Timestamp:', new Date().toISOString());
-      
-      // CRITICAL: IMMEDIATELY clear ALL predictionsByUser when user changes
-      // Use functional update to ensure we get the latest state and clear it completely
-      setPredictionsByUser(() => {
-        devLog('🧹 IMMEDIATELY clearing ALL predictionsByUser on user change');
-        return {}; // Complete reset - no merging, no checking, just clear everything
+      console.log('🔄 USER CHANGED: Clearing ALL predictions state', {
+        previousUserId,
+        newUserId,
+        timestamp: new Date().toISOString()
       });
       
-      // CRITICAL: Clear all related state immediately
+      // CRITICAL: Clear ALL predictionsByUser when user changes to prevent cross-contamination
+      // This ensures no data from the previous user can leak to the new user
+      setPredictionsByUser(prev => {
+        if (Object.keys(prev).length > 0) {
+          console.log('🧹 Clearing predictionsByUser on user change:', {
+            previousUserId,
+            newUserId,
+            clearedUserKeys: Object.keys(prev)
+          });
+        }
+        return {}; // Complete reset
+      });
+      
       setCommunitySentiment({});
       setSelectedMethod({});
       setPredictionsUserId(null);
-      setPredictionsLoading(true); // Block predictions display until new user's data is confirmed
-      setUserProfile(null); // CRITICAL: Clear user profile to prevent showing wrong user's stats
-      currentUserIdRef.current = null; // Also clear the ref IMMEDIATELY
+      currentUserIdRef.current = null; // Also clear the ref
       previousUserIdRef.current = newUserId || null;
-      
-      // Force a small delay to ensure state is cleared before any listeners fire
-      // This prevents race conditions where old listeners might fire
-      setTimeout(() => {
-        // Double-check that predictionsByUser is still empty
-        setPredictionsByUser(prev => {
-          if (Object.keys(prev).length > 0) {
-            console.error('🔒 WARNING: predictionsByUser not empty after user change! Forcing clear.', {
-              remainingKeys: Object.keys(prev),
-              newUserId
-            });
-            return {};
-          }
-          return prev;
-        });
-      }, 100);
     }
   }, [user?.uid]);
-
-  // CRITICAL: Guard effect to immediately clear predictions if they don't match current user
-  // This runs on every render to catch any stale predictions that might have leaked through
-  useEffect(() => {
-    const currentAuthUser = auth?.currentUser;
-    const currentUserUid = currentAuthUser?.uid || user?.uid;
-    const predictionsKeys = Object.keys(predictionsByUser);
-    
-    if (currentUserUid) {
-      // Check if predictionsByUser contains data for a different user
-      const hasWrongUser = predictionsKeys.some(key => key !== currentUserUid);
-      const hasWrongPredictionsUserId = predictionsUserId !== null && predictionsUserId !== currentUserUid;
-      
-      if (hasWrongUser || hasWrongPredictionsUserId) {
-        console.error('🔒 CRITICAL: Detected wrong user predictions in state! Clearing immediately.', {
-          currentUserUid,
-          predictionsKeys,
-          predictionsUserId,
-          authUserUid: currentAuthUser?.uid,
-          stateUserUid: user?.uid
-        });
-        
-        // Immediately clear all predictions and block display
-        setPredictionsByUser({});
-        setPredictionsUserId(null);
-        setPredictionsLoading(true);
-      } else if (!predictionsLoading && predictionsKeys.length > 0 && predictionsUserId === currentUserUid) {
-        // Predictions are valid - ensure loading is false
-        setPredictionsLoading(false);
-      } else if (predictionsKeys.length === 0 && predictionsUserId === null) {
-        // No predictions loaded yet - keep loading true
-        setPredictionsLoading(true);
-      }
-    } else if (predictionsKeys.length > 0 || predictionsUserId !== null) {
-      // No user logged in but predictions exist - clear them
-      console.error('🔒 CRITICAL: Predictions exist but no user logged in! Clearing.', {
-        predictionsKeys,
-        predictionsUserId
-      });
-      setPredictionsByUser({});
-      setPredictionsUserId(null);
-      setPredictionsLoading(true);
-    }
-  }, [user?.uid, predictionsByUser, predictionsUserId, auth]); // Removed predictionsLoading from deps to prevent loops
 
   // --- AUTH & INIT ---
   useEffect(() => {
@@ -1769,14 +1608,11 @@ export default function RingsidePickemFinal() {
     
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       // Clear all user data when auth state changes
-      devLog('🔄 AUTH STATE CHANGED');
-      devLog('   Previous User ID:', currentUserIdRef.current || '(none)');
-      devLog('   New User ID:', currentUser?.uid || '(none)');
-      devLog('   Current User Email:', currentUser?.email || '(no email)');
-      devLog('   Current User Display Name (Auth):', currentUser?.displayName || '(no name)');
-      devLog('   Current User Provider:', currentUser?.providerData?.[0]?.providerId || '(unknown)');
-      devLog('   Is Anonymous:', currentUser?.isAnonymous || false);
-      devLog('   Timestamp:', new Date().toISOString());
+      console.log('🔄 AUTH STATE CHANGED:', {
+        previousUserId: currentUserIdRef.current,
+        newUserId: currentUser?.uid,
+        timestamp: new Date().toISOString()
+      });
       currentUserIdRef.current = null;
       // CRITICAL: Clear predictionsByUser on auth change to prevent cross-contamination
       setPredictionsByUser({});
@@ -1784,115 +1620,24 @@ export default function RingsidePickemFinal() {
       setCommunitySentiment({});
       setSelectedMethod({});
       setPredictionsUserId(null);
-      setPredictionsLoading(true); // Block display until new user's data is confirmed
       
       setUser(currentUser);
       
       if (currentUser) {
-        // CRITICAL: Set currentUserIdRef BEFORE any async operations
-        const newUserId = currentUser.uid;
-        
-        // CRITICAL: Clear all predictions state IMMEDIATELY when user changes
-        // Do this BEFORE setting the new user ID to prevent any race conditions
-        setPredictionsByUser({});
-        setPredictionsUserId(null);
-        
-        currentUserIdRef.current = newUserId;
-        setUserId(newUserId);
+        currentUserIdRef.current = currentUser.uid;
+        setUserId(currentUser.uid);
         setIsConnected(true);
-        
-        // Store the user ID in a local variable to track what we're fetching
-        const fetchingUserId = newUserId;
-        
         try {
-          const profileRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', fetchingUserId);
+          const profileRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', currentUser.uid);
           const profileSnap = await getDoc(profileRef);
-          
-          // CRITICAL: Double-check user hasn't changed during async operation
-          // Use the currentUser from closure and compare with what we're fetching
-          // Don't rely on currentUserIdRef as it might be cleared by user change effect
-          if (!currentUser || currentUser.uid !== fetchingUserId) {
-            console.error('🔒 CRITICAL: User changed during profile fetch! Ignoring profile data.', {
-              fetchingUserId,
-              currentUserUid: currentUser?.uid
-            });
-            // Still need to set viewState to prevent infinite loading
-            setViewState(VIEW_STATES.ONBOARDING);
-            setOnboardingPage(1);
-            return;
-          }
           
           if (profileSnap.exists()) {
             const data = profileSnap.data();
             if (!data.subscriptions) data.subscriptions = [];
-            
-            // CRITICAL: Verify document path matches the user we're fetching for
-            const docPath = profileSnap.ref.path;
-            if (!docPath.includes(`/users/${fetchingUserId}`)) {
-              console.error('🔒 CRITICAL: Profile document path does not match fetching user!', {
-                docPath,
-                fetchingUserId,
-                currentUserUid: currentUser?.uid
-              });
-              setViewState(VIEW_STATES.ONBOARDING);
-              setOnboardingPage(1);
-              return;
-            }
-            
-            // FINAL CHECK: Verify we're still for the same user
-            // Check currentUser from closure (it's captured at the start of the handler)
-            if (currentUser && currentUser.uid === fetchingUserId) {
-              // CRITICAL: Additional check - if profile data contains a userId field, verify it matches
-              if (data.userId && data.userId !== fetchingUserId) {
-                console.error('🔒 CRITICAL: Profile data contains wrong user ID! Not setting profile.', {
-                  profileUserId: data.userId,
-                  expectedUserId: fetchingUserId,
-                  docPath
-                });
-                setViewState(VIEW_STATES.ONBOARDING);
-                setOnboardingPage(1);
-                return;
-              }
-              
-              devLog('✅ Setting user profile for:', fetchingUserId);
-              devLog('   Display Name:', data.displayName);
-              devLog('   Total Points:', data.totalPoints || 0);
-              devLog('   Predictions Correct:', data.predictionsCorrect || 0);
-              devLog('   Document Path:', docPath);
-              devLog('   Auth User Email:', currentUser?.email || '(no email)');
-              devLog('   Auth User Display Name:', currentUser?.displayName || '(no name)');
-              
-              // CRITICAL: Log mismatch if display names don't match
-              if (data.displayName && currentUser?.displayName && data.displayName !== currentUser.displayName) {
-                devWarn('⚠️  WARNING: Firestore displayName differs from Auth displayName!', {
-                  firestoreName: data.displayName,
-                  authName: currentUser.displayName,
-                  userId: fetchingUserId
-                });
-              }
-              
-              // CRITICAL: Use functional update to ensure we're setting for the correct user
-              setUserProfile(prev => {
-                // Final check before setting
-                if (currentUserIdRef.current !== fetchingUserId) {
-                  console.error('🔒 CRITICAL: User changed during profile set! Not updating.');
-                  return prev;
-                }
-                return data;
-              });
-              setViewState(VIEW_STATES.DASHBOARD);
-            } else {
-              console.error('🔒 CRITICAL: User changed after profile fetch! Not setting profile.', {
-                fetchingUserId,
-                currentUserUid: currentUser?.uid
-              });
-              // Still set viewState to prevent infinite loading
-              setViewState(VIEW_STATES.ONBOARDING);
-              setOnboardingPage(1);
-            }
+            setUserProfile(data);
+            setViewState('dashboard');
           } else {
-            devLog('📭 No profile document found for user:', fetchingUserId);
-            setViewState(VIEW_STATES.ONBOARDING);
+            setViewState('onboarding');
             setOnboardingPage(1); 
           }
         } catch (e) {
@@ -1900,7 +1645,7 @@ export default function RingsidePickemFinal() {
           setViewState('onboarding'); 
         }
       } else {
-        setViewState(VIEW_STATES.LOGIN);
+        setViewState('login');
         setUserId(null);
         setIsConnected(false);
       }
@@ -1912,151 +1657,33 @@ export default function RingsidePickemFinal() {
 
   // --- DATA LISTENER ---
   useEffect(() => {
-    if (viewState !== VIEW_STATES.DASHBOARD || !user || !user.uid) {
+    if (viewState !== 'dashboard' || !user || !user.uid) {
       // Clear predictions when not in dashboard or no user
       setCommunitySentiment({});
       setSelectedMethod({});
       setPredictionsUserId(null);
-      // CRITICAL: Also clear predictionsByUser when leaving dashboard or no user
-      setPredictionsByUser({});
       return;
     }
 
-    const currentUserId = user.uid;
-    
-    // CRITICAL: Clear predictionsByUser if it contains data for a different user
-    // This prevents stale data from previous users
-    setPredictionsByUser(prev => {
-      const prevUserKeys = Object.keys(prev);
-      if (prevUserKeys.length > 0 && !prevUserKeys.includes(currentUserId)) {
-        devLog('🧹 Clearing predictionsByUser - contains data for different user:', {
-          currentUserId,
-          previousUserKeys: prevUserKeys
-        });
-        return {}; // Clear all if it contains other users
-      }
-      // If it only contains current user or is empty, keep it
-      return prev;
-    });
-    
+    // CRITICAL: Don't clear predictionsByUser - it's keyed by user ID
+    // Just ensure we're tracking the correct user
     setCommunitySentiment({});
     setSelectedMethod({});
     setPredictionsUserId(null);
     
-    devLog('🔄 Setting up listener for user:', user.uid);
-    devLog('   User ID:', user.uid);
-    devLog('   Timestamp:', new Date().toISOString());
+    console.log('🔄 Setting up listener for user:', user.uid);
 
-    // CRITICAL: Store the user ID when listener is created to validate against
-    const profileListenerUserId = currentUserId;
-    
-    const unsubProfile = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'users', profileListenerUserId), (snap) => {
-        // CRITICAL: Validate this listener is still for the correct user
-        // Use profileListenerUserId (captured when listener was created) as the source of truth
-        // Don't rely on user.uid from closure as it might be stale
-        
-        // Primary check: currentUserIdRef should match (this is the most up-to-date)
-        if (currentUserIdRef.current !== profileListenerUserId) {
-          console.error('🔒 CRITICAL: User changed! Ignoring profile update.', {
-            listenerUserId: profileListenerUserId,
-            currentUserIdRef: currentUserIdRef.current,
-            userUid: user?.uid
-          });
-          return;
-        }
-        
-        // Secondary check: user object should match (if available)
-        if (user && user.uid !== profileListenerUserId) {
-          console.error('🔒 CRITICAL: User object mismatch! Ignoring profile update.', {
-            listenerUserId: profileListenerUserId,
-            userUid: user.uid,
-            currentUserIdRef: currentUserIdRef.current
-          });
-          return;
-        }
-        
-        // Secondary check: ref should match (but might be null during transitions)
-        if (currentUserIdRef.current !== null && currentUserIdRef.current !== profileListenerUserId) {
-          console.error('🔒 CRITICAL: Profile listener fired for wrong user! Ignoring.', {
-            listenerUserId: profileListenerUserId,
-            currentUserId: currentUserIdRef.current,
-            userUid: user?.uid
-          });
-          return;
-        }
-        
+    const unsubProfile = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), (snap) => {
         if(snap.exists()) {
            const data = snap.data();
-           
            // CRITICAL: Defensive coding against undefined arrays
            if (!data.subscriptions) data.subscriptions = []; 
-           
-           // FINAL CHECK: Verify document path matches current user
-           const docPath = snap.ref.path;
-           // Path format: artifacts/{appId}/public/data/users/{userId}
-           const pathContainsUserId = docPath.includes(`/users/${profileListenerUserId}`);
-           if (!pathContainsUserId) {
-             console.error('🔒 CRITICAL: Profile document path does not match current user!', {
-               docPath,
-               expectedUserId: profileListenerUserId,
-               currentUserId: currentUserIdRef.current,
-               userUid: user?.uid
-             });
-             return; // Don't update if path doesn't match
-           }
-           
-           // FINAL VALIDATION: Verify user still matches before setting
-           // Use currentUserIdRef as the source of truth (most up-to-date)
-           if (currentUserIdRef.current === profileListenerUserId) {
-             // CRITICAL: Additional check - if profile data contains a userId field, verify it matches
-             if (data.userId && data.userId !== profileListenerUserId) {
-               console.error('🔒 CRITICAL: Profile data contains wrong user ID! Not setting profile.', {
-                 profileUserId: data.userId,
-                 expectedUserId: profileListenerUserId,
-                 docPath
-               });
-               return;
-             }
-             
-             devLog('✅ Loading user profile for:', profileListenerUserId);
-             devLog('   Display Name:', data.displayName);
-             devLog('   Total Points:', data.totalPoints || 0);
-             devLog('   Predictions Correct:', data.predictionsCorrect || 0);
-             devLog('   Document Path:', docPath);
-             devLog('   Current User Ref:', currentUserIdRef.current);
-             devLog('   User Object UID:', user?.uid);
-             
-             // CRITICAL: Use functional update to ensure we're setting for the correct user
-             setUserProfile(prev => {
-               // Final check before setting - use currentUserIdRef as source of truth
-               if (currentUserIdRef.current !== profileListenerUserId) {
-                 console.error('🔒 CRITICAL: User changed during profile set! Not updating.', {
-                   currentRef: currentUserIdRef.current,
-                   listenerUserId: profileListenerUserId
-                 });
-                 return prev;
-               }
-               return data;
-             });
-           } else {
-             console.error('🔒 CRITICAL: Final validation failed! Not setting profile.', {
-               userUid: user?.uid,
-               listenerUserId: profileListenerUserId,
-               refUserId: currentUserIdRef.current
-             });
-           }
-        } else {
-          devLog('📭 No profile found for user:', profileListenerUserId);
+           setUserProfile(data);
         }
     });
 
     // Set up predictions listener for current user
-    // Note: currentUserId is already declared above (line 1746)
-    
-    // CRITICAL: Clear predictionsByUser completely before setting up new listener
-    // This prevents old predictions from persisting when switching users
-    setPredictionsByUser({});
-    setPredictionsUserId(null);
+    const currentUserId = user.uid;
     
     // CRITICAL: Use a ref to track this specific listener's user ID
     // This prevents race conditions where an old listener fires after user change
@@ -2067,10 +1694,11 @@ export default function RingsidePickemFinal() {
     let isListenerValid = true;
     
     const predictionsPath = `artifacts/${appId}/users/${currentUserId}/predictions`;
-    devLog('🔍 SETTING UP PREDICTIONS LISTENER');
-    devLog('   User ID:', currentUserId);
-    devLog('   Path:', predictionsPath);
-    devLog('   Timestamp:', new Date().toISOString());
+    console.log('🔍 SETTING UP PREDICTIONS LISTENER:', {
+      userId: currentUserId,
+      path: predictionsPath,
+      timestamp: new Date().toISOString()
+    });
     
     const unsubPreds = onSnapshot(
       collection(db, 'artifacts', appId, 'users', currentUserId, 'predictions'), 
@@ -2078,13 +1706,13 @@ export default function RingsidePickemFinal() {
         // CRITICAL: Multiple checks to prevent stale predictions
         // 1. Check if listener is still valid
         if (!isListenerValid) {
-          devLog('🔒 Listener invalidated, ignoring update');
+          console.log('🔒 Listener invalidated, ignoring update');
           return;
         }
         
         // 2. Check if this listener's user ID still matches the current user
         if (listenerUserIdRef.current !== currentUserId) {
-          devLog('🔒 Listener user ID mismatch, invalidating', {
+          console.log('🔒 Listener user ID mismatch, invalidating', {
             listenerUserId: listenerUserIdRef.current,
             expectedUserId: currentUserId
           });
@@ -2094,7 +1722,7 @@ export default function RingsidePickemFinal() {
         
         // 3. Check if the global current user ref has changed
         if (currentUserIdRef.current !== currentUserId) {
-          devLog('🔒 Global user ref changed, invalidating', {
+          console.log('🔒 Global user ref changed, invalidating', {
             globalRef: currentUserIdRef.current,
             expectedUserId: currentUserId
           });
@@ -2102,31 +1730,8 @@ export default function RingsidePickemFinal() {
           return;
         }
         
-        // 4. CRITICAL: Verify auth.currentUser matches (source of truth)
-        // auth.currentUser is always current, unlike user state which can be stale
-        const currentAuthUser = auth.currentUser;
-        if (currentAuthUser && currentAuthUser.uid !== currentUserId) {
-          console.error('🔒 CRITICAL: auth.currentUser mismatch in listener!', {
-            listenerUserId: currentUserId,
-            authUserUid: currentAuthUser.uid,
-            stateUserUid: user?.uid,
-            timestamp: new Date().toISOString()
-          });
-          isListenerValid = false;
-          return;
-        }
-        
-        // 5. Also check user state as secondary validation
-        if (user && user.uid !== currentUserId) {
-          console.error('🔒 CRITICAL: User state mismatch in listener!', {
-            listenerUserId: currentUserId,
-            userObjectUid: user.uid,
-            authUserUid: currentAuthUser?.uid,
-            timestamp: new Date().toISOString()
-          });
-          isListenerValid = false;
-          return;
-        }
+        // CRITICAL: Don't use user object from closure - it might be stale
+        // Only use currentUserId which was captured when listener was created
         
         // CRITICAL: Verify the listener path matches what we expect
         // Double-check that currentUserId hasn't changed
@@ -2142,13 +1747,14 @@ export default function RingsidePickemFinal() {
         }
         
         // All checks passed - this is a valid update for the current user
-        devLog('✅ FIRESTORE LISTENER FIRED - Loading predictions for user:', currentUserId);
-        devLog('   Path:', predictionsPath);
-        devLog('   Document Count:', snap.size);
-        devLog('   Document IDs:', snap.docs.map(d => d.id));
-        devLog('   Listener User ID:', listenerUserIdRef.current);
-        devLog('   Global Ref User ID:', currentUserIdRef.current);
-        devLog('   Timestamp:', new Date().toISOString());
+        console.log('✅ FIRESTORE LISTENER FIRED - Loading predictions for user:', currentUserId, {
+          path: predictionsPath,
+          docCount: snap.size,
+          docIds: snap.docs.map(d => d.id),
+          listenerUserId: listenerUserIdRef.current,
+          globalRef: currentUserIdRef.current,
+          timestamp: new Date().toISOString()
+        });
         
         // CRITICAL: Verify each document belongs to this user by checking the path
         // Firestore collection listeners should only return docs from the specified collection,
@@ -2158,73 +1764,39 @@ export default function RingsidePickemFinal() {
           // Verify the document path contains the correct user ID
           const docPath = doc.ref.path;
           if (!docPath.includes(`/users/${currentUserId}/predictions/`)) {
-            console.error('🔒 CRITICAL: Document path does not match expected user!');
-            console.error('   Document Path:', docPath);
-            console.error('   Expected User ID:', currentUserId);
-            console.error('   Document ID:', doc.id);
+            console.error('🔒 CRITICAL: Document path does not match expected user!', {
+              docPath,
+              expectedUserId: currentUserId,
+              docId: doc.id
+            });
             return; // Skip this document
           }
           preds[doc.id] = doc.data();
         });
         
-        // CRITICAL: Final check before updating state - verify auth.currentUser still matches
-        const finalAuthUser = auth.currentUser;
-        if (finalAuthUser && finalAuthUser.uid !== currentUserId) {
-          console.error('🔒 CRITICAL: auth.currentUser changed before state update! Blocking.', {
-            listenerUserId: currentUserId,
-            authUserUid: finalAuthUser.uid,
-            timestamp: new Date().toISOString()
-          });
-          isListenerValid = false;
-          return;
-        }
-        
         // CRITICAL: Use functional update to ensure we only set if user hasn't changed
         setPredictionsUserId((prevUserId) => {
           // Double-check that we're still for the same user
-          const checkAuthUser = auth.currentUser;
-          if (checkAuthUser && checkAuthUser.uid !== currentUserId) {
-            console.error('🔒 CRITICAL: auth.currentUser changed during prediction load!', {
-              prevUserId,
-              currentUserId,
-              authUserUid: checkAuthUser.uid,
-              globalRef: currentUserIdRef.current
-            });
-            setPredictionsLoading(true); // Keep blocking
-            return null; // Don't update if user changed
-          }
           if (prevUserId !== null && prevUserId !== currentUserId) {
             console.error('🔒 CRITICAL: User changed during prediction load!', {
               prevUserId,
               currentUserId,
               globalRef: currentUserIdRef.current
             });
-            setPredictionsLoading(true); // Keep blocking
             return null; // Don't update if user changed
           }
-          // Only allow predictions to show if we've confirmed they're for the right user
-          setPredictionsLoading(false);
           return currentUserId;
         });
         
         if (Object.keys(preds).length === 0) {
-          devLog('📭 No predictions found for user:', currentUserId);
+          console.log('📭 No predictions found for user:', currentUserId);
           // Set empty predictions for this user in the keyed structure
           setPredictionsByUser(prev => {
-            // Final safety check - verify auth.currentUser still matches
-            const checkAuthUser = auth.currentUser;
-            if (checkAuthUser && checkAuthUser.uid !== currentUserId) {
-              console.error('🔒 CRITICAL: auth.currentUser changed during empty prediction set!');
-              setPredictionsLoading(true);
-              return prev;
-            }
+            // Final safety check
             if (currentUserIdRef.current !== currentUserId) {
               console.error('🔒 CRITICAL: User changed during empty prediction set!');
-              setPredictionsLoading(true);
               return prev;
             }
-            // Empty predictions are valid - allow display
-            setPredictionsLoading(false);
             return {
               ...prev,
               [currentUserId]: {}
@@ -2233,23 +1805,14 @@ export default function RingsidePickemFinal() {
         } else {
           // Note: predictionsByUser might be empty here because we're reading it before the state update
           // This is expected - the state will be updated in the setPredictionsByUser call below
-          devLog('📥 Loaded predictions for user:', currentUserId);
-          devLog('   Event Count:', Object.keys(preds).length);
-          devLog('   Event IDs:', Object.keys(preds));
-          devLog('   Timestamp:', new Date().toISOString());
+          console.log('📥 Loaded predictions for user:', currentUserId, {
+            eventCount: Object.keys(preds).length,
+            events: Object.keys(preds)
+          });
           
           // CRITICAL: Store predictions keyed by user ID - this prevents cross-contamination
           setPredictionsByUser(prev => {
-            // Final safety check - verify auth.currentUser still matches
-            const checkAuthUser = auth.currentUser;
-            if (checkAuthUser && checkAuthUser.uid !== currentUserId) {
-              console.error('🔒 CRITICAL: auth.currentUser changed during prediction set! Not updating.', {
-                authUserUid: checkAuthUser.uid,
-                expectedUserId: currentUserId,
-                globalRef: currentUserIdRef.current
-              });
-              return prev; // Return previous state, don't update
-            }
+            // Final safety check - only update if user hasn't changed
             if (currentUserIdRef.current !== currentUserId) {
               console.error('🔒 CRITICAL: User changed during prediction set! Not updating.', {
                 globalRef: currentUserIdRef.current,
@@ -2261,35 +1824,22 @@ export default function RingsidePickemFinal() {
             // CRITICAL: Final validation - ensure we're not mixing users
             const previousUserKeys = Object.keys(prev);
             if (previousUserKeys.length > 0 && !previousUserKeys.includes(currentUserId)) {
-              console.error('🔒 CRITICAL: Attempting to store predictions while other users exist in state!');
-              console.error('   Current User ID:', currentUserId);
-              console.error('   Previous User Keys:', previousUserKeys);
-              console.error('   Event Count:', Object.keys(preds).length);
-              // Clear all other users' predictions before storing this user's
-              devLog('🧹 Clearing other users\' predictions to prevent cross-contamination');
-              return {
-                [currentUserId]: preds
-              };
-            }
-            
-            // CRITICAL: If predictionsByUser contains a different user, clear it first
-            if (previousUserKeys.length === 1 && previousUserKeys[0] !== currentUserId) {
-              console.error('🔒 CRITICAL: predictionsByUser contains wrong user! Clearing and replacing.', {
-                storedUser: previousUserKeys[0],
-                currentUser: currentUserId
+              console.error('🔒 CRITICAL: Attempting to store predictions while other users exist in state!', {
+                currentUserId,
+                previousUserKeys,
+                eventCount: Object.keys(preds).length
               });
+              // Clear all other users' predictions before storing this user's
+              console.log('🧹 Clearing other users\' predictions to prevent cross-contamination');
               return {
                 [currentUserId]: preds
               };
             }
             
-            devLog('✅ Storing predictions for user:', currentUserId);
-            devLog('   Event Count:', Object.keys(preds).length);
-            devLog('   Previous User Keys:', previousUserKeys.length > 0 ? previousUserKeys : '(none)');
-            devLog('   Event IDs:', Object.keys(preds));
-            
-            // Only allow predictions to show if we've confirmed they're for the right user
-            setPredictionsLoading(false);
+            console.log('✅ Storing predictions for user:', currentUserId, {
+              eventCount: Object.keys(preds).length,
+              previousUserKeys: previousUserKeys
+            });
             
             // Store predictions under the user's ID
             return {
@@ -2309,9 +1859,7 @@ export default function RingsidePickemFinal() {
     );
     
     const cleanupPredictions = () => {
-      devLog('🧹 CLEANING UP predictions listener for user:', currentUserId);
-      devLog('   User ID:', currentUserId);
-      devLog('   Timestamp:', new Date().toISOString());
+      console.log('🧹 CLEANING UP predictions listener for user:', currentUserId);
       // Invalidate listener immediately
       isListenerValid = false;
       listenerUserIdRef.current = null;
@@ -2321,13 +1869,12 @@ export default function RingsidePickemFinal() {
       setPredictionsByUser(prev => {
         const updated = { ...prev };
         delete updated[currentUserId];
-        const remainingUsers = Object.keys(updated);
-        devLog('🧹 Removed predictions for user:', currentUserId);
-        devLog('   Remaining Users:', remainingUsers.length > 0 ? remainingUsers : '(none)');
+        console.log('🧹 Removed predictions for user:', currentUserId, {
+          remainingUsers: Object.keys(updated)
+        });
         return updated;
       });
       setPredictionsUserId(null);
-      setPredictionsLoading(true); // Block display when cleaning up
     };
     
     // FIXED: Use 6 segment path for document listener: artifacts/appId/public/data/scores/global
@@ -2395,59 +1942,35 @@ export default function RingsidePickemFinal() {
 
     return () => {
       // CRITICAL: Clean up in proper order to prevent race conditions
-      // 1. Invalidate listener flag FIRST to prevent any callbacks from firing
-      isListenerValid = false;
-      listenerUserIdRef.current = null;
-      
-      // 2. Invalidate and unsubscribe from predictions (most important)
+      // 1. Invalidate and unsubscribe from predictions first (most important)
       cleanupPredictions();
-      
-      // 3. Then clean up other listeners
+      // 2. Then clean up other listeners
       unsubProfile(); 
       unsubResults(); 
       unsubLb(); 
       unsubEvents();
-      
-      // 4. Clear all state as final step
-      // CRITICAL: Also clear predictionsByUser and userProfile on cleanup to prevent stale data
-      setPredictionsByUser({});
-      setUserProfile(null); // CRITICAL: Clear profile to prevent showing wrong user's stats
+      // 3. Clear all state as final step (except predictionsByUser - it's keyed by user ID)
       setCommunitySentiment({});
       setSelectedMethod({});
       setPredictionsUserId(null);
     };
   }, [viewState, user?.uid]); // CRITICAL: Re-run when user changes to prevent stale data
   
-  // Additional safety: Clear predictionsUserId and predictionsByUser if user changes while in dashboard
+  // Additional safety: Clear predictionsUserId if user changes while in dashboard
   useEffect(() => {
-    if (viewState === VIEW_STATES.DASHBOARD && user?.uid && predictionsUserId !== null && predictionsUserId !== user.uid) {
-      console.error('🔒 CRITICAL: User changed but predictionsUserId not updated! Resetting everything.');
-      console.error('   predictionsUserId:', predictionsUserId);
-      console.error('   Current User ID:', user.uid);
-      // CRITICAL: Clear predictionsByUser completely when user mismatch detected
-      setPredictionsByUser({});
-      setPredictionsUserId(null);
-    }
-    
-    // Also check if predictionsByUser contains wrong user
-    if (viewState === VIEW_STATES.DASHBOARD && user?.uid) {
-      setPredictionsByUser(prev => {
-        const userKeys = Object.keys(prev);
-        if (userKeys.length > 0 && !userKeys.includes(user.uid)) {
-          console.error('🔒 CRITICAL: predictionsByUser contains wrong user! Clearing.');
-          console.error('   Current User ID:', user.uid);
-          console.error('   Stored User Keys:', userKeys);
-          return {};
-        }
-        // If it contains current user or is empty, keep it
-        return prev;
+    if (viewState === 'dashboard' && user?.uid && predictionsUserId !== null && predictionsUserId !== user.uid) {
+      console.error('🔒 CRITICAL: User changed but predictionsUserId not updated! Resetting.', {
+        predictionsUserId,
+        currentUserId: user.uid
       });
+      // Don't clear predictionsByUser - it's keyed by user ID
+      setPredictionsUserId(null);
     }
   }, [user?.uid, predictionsUserId, viewState]);
 
   // Calculate community sentiment when event is selected
   useEffect(() => {
-    if (selectedEvent?.id && viewState === VIEW_STATES.DASHBOARD) {
+    if (selectedEvent?.id && viewState === 'dashboard') {
       calculateCommunitySentiment(selectedEvent.id);
     }
     // Note: calculateCommunitySentiment is not in deps as it's stable and uses current state
@@ -2460,8 +1983,11 @@ export default function RingsidePickemFinal() {
       setIsLoggingIn(true);
       setLoginError(null);
       try {
-          // Remove test code - always use anonymous sign-in for guests
-          await signInAnonymously(auth);
+          if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+             await signInWithCustomToken(auth, __initial_auth_token);
+          } else {
+             await signInAnonymously(auth);
+          }
       } catch (error) {
           console.error("Firebase auth error:", error);
           const errorMessage = error.code === 'auth/configuration-not-found' || 
@@ -2477,41 +2003,16 @@ export default function RingsidePickemFinal() {
   };
 
   const handleEmailSignUp = async () => {
-    // Import validation utilities
-    const { isValidEmail, validatePassword, validateDisplayName } = await import('./utils/inputValidation.js');
-    const { authRateLimiter } = await import('./utils/rateLimiter.js');
-    
-    // Rate limiting
-    const rateLimitKey = email.trim().toLowerCase();
-    if (!authRateLimiter.isAllowed(rateLimitKey)) {
-      const timeUntilNext = authRateLimiter.getTimeUntilNext(rateLimitKey);
-      const seconds = Math.ceil(timeUntilNext / 1000);
-      setLoginError(`Too many sign-up attempts. Please wait ${seconds} second${seconds !== 1 ? 's' : ''} before trying again.`);
+    if (!email.trim() || !password.trim() || !displayName.trim()) {
+      setLoginError('Please fill in all fields');
       return;
     }
-    
-    // Validate email
-    if (!isValidEmail(email)) {
-      setLoginError('Please enter a valid email address');
+    if (password.length < 6) {
+      setLoginError('Password must be at least 6 characters');
       return;
     }
-    
-    // Validate password
-    const passwordValidation = validatePassword(password);
-    if (!passwordValidation.isValid) {
-      setLoginError(passwordValidation.errors[0]);
-      return;
-    }
-    
     if (password !== confirmPassword) {
       setLoginError('Passwords do not match');
-      return;
-    }
-    
-    // Validate display name
-    const nameValidation = validateDisplayName(displayName);
-    if (!nameValidation.isValid) {
-      setLoginError(nameValidation.errors[0]);
       return;
     }
 
@@ -2519,12 +2020,12 @@ export default function RingsidePickemFinal() {
     setLoginError(null);
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      await updateProfile(userCredential.user, { displayName: nameValidation.sanitized });
+      await updateProfile(userCredential.user, { displayName: displayName.trim() });
       
       // Create user profile in Firestore
       const profile = {
-        displayName: nameValidation.sanitized,
-        email: email.trim().toLowerCase(),
+        displayName: displayName.trim(),
+        email: email.trim(),
         subscriptions: ['wwe', 'aew', 'njpw'],
         totalPoints: 0,
         predictionsCorrect: 0,
@@ -2560,33 +2061,15 @@ export default function RingsidePickemFinal() {
   };
 
   const handleEmailSignIn = async () => {
-    // Import validation utilities
-    const { isValidEmail } = await import('./utils/inputValidation.js');
-    const { authRateLimiter } = await import('./utils/rateLimiter.js');
-    
-    // Rate limiting
-    const rateLimitKey = email.trim().toLowerCase();
-    if (!authRateLimiter.isAllowed(rateLimitKey)) {
-      const timeUntilNext = authRateLimiter.getTimeUntilNext(rateLimitKey);
-      const seconds = Math.ceil(timeUntilNext / 1000);
-      setLoginError(`Too many sign-in attempts. Please wait ${seconds} second${seconds !== 1 ? 's' : ''} before trying again.`);
-      return;
-    }
-    
     if (!email.trim() || !password.trim()) {
       setLoginError('Please enter email and password');
-      return;
-    }
-    
-    if (!isValidEmail(email)) {
-      setLoginError('Please enter a valid email address');
       return;
     }
 
     setIsLoggingIn(true);
     setLoginError(null);
     try {
-      await signInWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
+      await signInWithEmailAndPassword(auth, email, password);
       // User profile will be loaded by the auth state listener
     } catch (error) {
       console.error("Sign in error:", error);
@@ -2682,23 +2165,17 @@ export default function RingsidePickemFinal() {
       console.error("Google sign in error:", error);
       setIsLoggingIn(false);
       
-      // Provide helpful error messages for common Firebase auth errors
       let errorMessage = "Failed to sign in with Google. ";
-      if (error.code === 'auth/unauthorized-domain') {
-        const currentDomain = window.location.hostname;
-        errorMessage = `Unauthorized domain error. Your domain "${currentDomain}" is not authorized in Firebase.\n\nTo fix this:\n1. Go to Firebase Console (https://console.firebase.google.com)\n2. Select your project\n3. Go to Authentication → Settings\n4. Scroll to "Authorized domains"\n5. Click "Add domain"\n6. Add: ${currentDomain}\n7. For localhost development, also add: localhost\n\nAfter adding the domain, wait a few seconds and try again.`;
-      } else if (error.code === 'auth/popup-closed-by-user') {
+      if (error.code === 'auth/popup-closed-by-user') {
         errorMessage = "Sign-in popup was closed. Please try again.";
       } else if (error.code === 'auth/popup-blocked') {
-        errorMessage = "Popup was blocked. Please allow popups for this site and try again.";
+        errorMessage = "Popup was blocked. Please allow popups for this site.";
       } else if (error.code === 'auth/account-exists-with-different-credential') {
         errorMessage = "An account already exists with this email. Please sign in with your existing method.";
       } else if (error.code === 'auth/cancelled-popup-request') {
         errorMessage = "Sign-in was cancelled. Please try again.";
-      } else if (error.message) {
-        errorMessage += error.message;
       } else {
-        errorMessage += "Please try again.";
+        errorMessage += error.message || "Please try again.";
       }
       setLoginError(errorMessage);
     }
@@ -2777,13 +2254,8 @@ export default function RingsidePickemFinal() {
   };
 
   const handleUpdateDisplayName = async () => {
-    // Import validation utilities
-    const { validateDisplayName } = await import('./utils/inputValidation.js');
-    
-    // Validate display name
-    const nameValidation = validateDisplayName(displayName);
-    if (!nameValidation.isValid) {
-      setAccountError(nameValidation.errors[0]);
+    if (!displayName.trim()) {
+      setAccountError('Please enter a display name');
       return;
     }
 
@@ -2791,11 +2263,11 @@ export default function RingsidePickemFinal() {
     setAccountSuccess(null);
     try {
       if (user) {
-        await updateProfile(user, { displayName: nameValidation.sanitized });
+        await updateProfile(user, { displayName: displayName.trim() });
         // Update display name in Firestore profile
         await updateDoc(
           doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid),
-          { displayName: nameValidation.sanitized }
+          { displayName: displayName.trim() }
         );
         setAccountSuccess('Display name updated successfully!');
       }
@@ -2852,160 +2324,98 @@ export default function RingsidePickemFinal() {
     }
   };
 
-  const makePrediction = async (eventId, matchId, winner, method = null) => {
-    // Import utilities for validation and rate limiting
-    const { predictionRateLimiter } = await import('./utils/rateLimiter.js');
-    const { sanitizeEventId, sanitizeString, isValidUserId } = await import('./utils/inputValidation.js');
-    
-    // CRITICAL: Use auth.currentUser as the source of truth, NOT the user state variable
-    // The user state can be stale, but auth.currentUser is always current
-    const currentAuthUser = auth.currentUser;
-    if (!currentAuthUser || !currentAuthUser.uid) {
+  const makePrediction = (eventId, matchId, winner, method = null) => {
+    if (!user || !user.uid) {
       console.error('❌ Cannot make prediction: no user logged in');
-      console.error('   Auth currentUser:', currentAuthUser);
-      console.error('   User state:', user);
-      console.error('   currentUserIdRef:', currentUserIdRef.current);
       return;
     }
-    
-    const currentUserId = currentAuthUser.uid;
-    
-    // Validate user ID format
-    if (!isValidUserId(currentUserId)) {
-      console.error('❌ Invalid user ID format');
-      return;
-    }
-    
-    // Rate limiting - prevent abuse
-    if (!predictionRateLimiter.isAllowed(currentUserId)) {
-      const timeUntilNext = predictionRateLimiter.getTimeUntilNext(currentUserId);
-      const seconds = Math.ceil(timeUntilNext / 1000);
-      setLoginError(`Too many predictions. Please wait ${seconds} second${seconds !== 1 ? 's' : ''} before making another prediction.`);
-      return;
-    }
-    
-    // Sanitize inputs
-    const sanitizedEventId = sanitizeEventId(eventId);
-    if (!sanitizedEventId) {
-      console.error('❌ Invalid event ID format');
-      return;
-    }
-    
-    const sanitizedWinner = sanitizeString(winner);
-    if (!sanitizedWinner || sanitizedWinner.length === 0) {
-      console.error('❌ Invalid winner name');
-      return;
-    }
-    
-    const sanitizedMethod = method ? sanitizeString(method) : null;
     
     // FIXED: Normalize matchId to string for consistency
     const normalizedMatchId = matchId.toString();
     
     // CRITICAL: Multiple validation checks to prevent saving predictions for wrong user
     // 1. Check predictionsUserId matches current user
-    if (predictionsUserId !== null && predictionsUserId !== currentUserId) {
+    if (predictionsUserId !== null && predictionsUserId !== user.uid) {
       console.error('❌ BLOCKING prediction save - predictionsUserId does not match current user!', {
         predictionsUserId,
-        currentUserId: currentUserId,
-        authUserUid: currentAuthUser.uid,
-        userStateUid: user?.uid,
-        refUid: currentUserIdRef.current
+        currentUserId: user.uid
       });
       return;
     }
     
     // 2. Check currentUserIdRef matches (extra safety)
-    if (currentUserIdRef.current !== currentUserId) {
+    if (currentUserIdRef.current !== user.uid) {
       console.error('❌ BLOCKING prediction save - currentUserIdRef does not match current user!', {
         refUserId: currentUserIdRef.current,
-        currentUserId: currentUserId,
-        authUserUid: currentAuthUser.uid
+        currentUserId: user.uid
       });
       return;
     }
     
     // 3. Final check - verify predictionsUserId is set (means listener is active for this user)
     if (predictionsUserId === null) {
-      devWarn('⚠️ Warning: predictionsUserId is null - predictions listener may not be active yet');
+      console.warn('⚠️ Warning: predictionsUserId is null - predictions listener may not be active yet');
       // Don't block, but log a warning
     }
     
     // CRITICAL: Get current user's predictions from keyed structure
-    // Use currentUserId (from auth.currentUser) as the source of truth
-    const currentUserPreds = predictionsByUser[currentUserId] || {};
-    const currentPreds = currentUserPreds[sanitizedEventId] || {};
+    // Use user.uid directly (it's fresh from the function parameter validation)
+    const currentUserPreds = predictionsByUser[user.uid] || {};
+    const currentPreds = currentUserPreds[eventId] || {};
     const newPreds = { 
       ...currentPreds, 
-      [normalizedMatchId]: sanitizedMethod ? { winner: sanitizedWinner, method: sanitizedMethod } : sanitizedWinner
+      [normalizedMatchId]: method ? { winner, method } : winner
     };
     
     // CRITICAL: Update local state using user-keyed structure
-    setPredictionsByUser(prev => {
-      // Clear any other users' predictions if they exist
-      const otherUserKeys = Object.keys(prev).filter(key => key !== currentUserId);
-      if (otherUserKeys.length > 0) {
-        devWarn('🧹 Clearing other users\' predictions in makePrediction:', otherUserKeys);
-        return {
-          [currentUserId]: {
-            ...currentUserPreds,
-            [sanitizedEventId]: newPreds
-          }
-        };
-      }
-      
-      return {
-        ...prev,
-        [currentUserId]: {
-          ...currentUserPreds,
-          [sanitizedEventId]: newPreds
-        }
-      };
+    setCurrentUserPredictions({
+      ...currentUserPreds,
+      [eventId]: newPreds
     });
     
-    // CRITICAL: Always use currentUserId from auth.currentUser, never from state
-    const predictionPath = `artifacts/${appId}/users/${currentUserId}/predictions/${sanitizedEventId}`;
+    // CRITICAL: Always use user.uid from the user object, never from state
+    const predictionPath = `artifacts/${appId}/users/${user.uid}/predictions/${eventId}`;
     
-    devLog('💾 SAVING PREDICTION');
-    devLog('   User ID (Auth):', currentUserId);
-    devLog('   User ID (State):', user?.uid);
-    devLog('   User ID (Ref):', currentUserIdRef.current);
-    devLog('   Event ID:', sanitizedEventId);
-    devLog('   Match ID:', normalizedMatchId);
-    devLog('   Winner:', sanitizedWinner);
-    devLog('   Method:', sanitizedMethod || '(none)');
-    devLog('   Path:', predictionPath);
-    devLog('   Validation Checks:');
-    devLog('     predictionsUserId Match:', predictionsUserId === currentUserId ? '✓' : '✗');
-    devLog('     ref Match:', currentUserIdRef.current === currentUserId ? '✓' : '✗');
-    devLog('     auth.currentUser Match:', currentAuthUser.uid === currentUserId ? '✓' : '✗');
-    devLog('   Timestamp:', new Date().toISOString());
+    console.log('💾 SAVING PREDICTION:', {
+      userId: user.uid,
+      eventId,
+      matchId: normalizedMatchId,
+      winner,
+      method,
+      path: predictionPath,
+      fullPath: `artifacts/${appId}/users/${user.uid}/predictions/${eventId}`,
+      validationChecks: {
+        predictionsUserIdMatch: predictionsUserId === user.uid,
+        refMatch: currentUserIdRef.current === user.uid
+      },
+      timestamp: new Date().toISOString()
+    });
     
     // CRITICAL: Don't save __ownerId or __timestamp to Firestore - they're only for in-memory state
     // newPreds only contains the actual prediction data, so it's safe to save
-    setDoc(doc(db, 'artifacts', appId, 'users', currentUserId, 'predictions', sanitizedEventId), newPreds, { merge: true })
+    setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'predictions', eventId), newPreds, { merge: true })
       .then(() => {
         if (process.env.NODE_ENV === 'development') {
-          devLog('✅ PREDICTION SAVED SUCCESSFULLY:', {
-            userId: currentUserId,
-            eventId: sanitizedEventId,
+          console.log('✅ PREDICTION SAVED SUCCESSFULLY:', {
+            userId: user.uid,
+            eventId,
             matchId: normalizedMatchId
           });
         }
-        setTimeout(() => calculateCommunitySentiment(sanitizedEventId), 1000);
+        setTimeout(() => calculateCommunitySentiment(eventId), 1000);
       })
       .catch((error) => {
         console.error('❌ Error saving prediction:', error);
         // On error, revert the optimistic update
         setPredictionsByUser(prev => {
-          if (!prev[currentUserId]) return prev;
+          if (!prev[user.uid]) return prev;
           const reverted = { ...prev };
-          if (reverted[currentUserId][sanitizedEventId]) {
-            const eventPreds = { ...reverted[currentUserId][sanitizedEventId] };
+          if (reverted[user.uid][eventId]) {
+            const eventPreds = { ...reverted[user.uid][eventId] };
             delete eventPreds[normalizedMatchId];
-            reverted[currentUserId] = {
-              ...reverted[currentUserId],
-              [sanitizedEventId]: eventPreds
+            reverted[user.uid] = {
+              ...reverted[user.uid],
+              [eventId]: eventPreds
             };
           }
           return reverted;
@@ -3121,58 +2531,18 @@ export default function RingsidePickemFinal() {
         if (predictedWinner === results[matchId]) correctCount++; 
       });
       
-      // CRITICAL: Validate user.uid before updating profile
-      const updatingUserId = user.uid;
-      if (!updatingUserId) {
-        console.error('🔒 CRITICAL: Cannot update profile - no user ID!');
-        return;
-      }
-      
-      // CRITICAL: Verify currentUserIdRef matches before updating
-      if (currentUserIdRef.current !== updatingUserId) {
-        console.error('🔒 CRITICAL: Cannot update profile - user ID mismatch!', {
-          refUserId: currentUserIdRef.current,
-          updatingUserId
-        });
-        return;
-      }
-      
-      devLog('📊 Updating user profile with points:', {
-        userId: updatingUserId,
-        correctCount,
-        pointsToAdd: correctCount * 10
-      });
-      
-      setUserProfile(prev => {
-        // CRITICAL: Final check before updating local state
-        if (currentUserIdRef.current !== updatingUserId) {
-          console.error('🔒 CRITICAL: User changed during profile update! Not updating local state.');
-          return prev;
-        }
-        return {
+      setUserProfile(prev => ({
           ...prev,
           totalPoints: (prev.totalPoints || 0) + (correctCount * 10),
           predictionsCorrect: (prev.predictionsCorrect || 0) + correctCount,
           predictionsTotal: (prev.predictionsTotal || 0) + event.matches.length
-        };
-      });
+      }));
 
-      // CRITICAL: Double-check user ID before saving to Firestore
-      if (currentUserIdRef.current === updatingUserId && user && user.uid === updatingUserId) {
-        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', updatingUserId), {
-          totalPoints: increment(correctCount * 10),
-          predictionsCorrect: increment(correctCount),
-          predictionsTotal: increment(event.matches.length)
-        }).catch(error => {
-          console.error('🔒 CRITICAL: Error updating user profile:', error);
-        });
-      } else {
-        console.error('🔒 CRITICAL: User ID validation failed before saving profile update!', {
-          refUserId: currentUserIdRef.current,
-          updatingUserId,
-          userUid: user?.uid
-        });
-      }
+      updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), {
+        totalPoints: increment(correctCount * 10),
+        predictionsCorrect: increment(correctCount),
+        predictionsTotal: increment(event.matches.length)
+      });
     }
   };
 
@@ -3191,24 +2561,15 @@ export default function RingsidePickemFinal() {
 
   const filteredLeaderboard = useMemo(() => {
     if (!leaderboard.length) return [];
-    if (leaderboardScope === LEADERBOARD_SCOPES.GLOBAL) return leaderboard;
-    if (leaderboardScope === LEADERBOARD_SCOPES.COUNTRY) return leaderboard.filter(u => u.country === (userProfile?.country || 'USA'));
-    if (leaderboardScope === LEADERBOARD_SCOPES.REGION) return leaderboard.filter(u => u.region === (userProfile?.region || 'NA'));
-    if (leaderboardScope === LEADERBOARD_SCOPES.FRIENDS) return leaderboard.filter((u, i) => (userId && u.id === userId) || i % 3 === 0);
+    if (leaderboardScope === 'global') return leaderboard;
+    if (leaderboardScope === 'country') return leaderboard.filter(u => u.country === (userProfile?.country || 'USA'));
+    if (leaderboardScope === 'region') return leaderboard.filter(u => u.region === (userProfile?.region || 'NA'));
+    if (leaderboardScope === 'friends') return leaderboard.filter((u, i) => (userId && u.id === userId) || i % 3 === 0);
     return leaderboard;
   }, [leaderboard, leaderboardScope, userProfile, userId]);
 
   // Helper function to determine if an event is a weekly show or PPV
   const isWeeklyShow = (eventName) => {
-    // First check for known PPV names that might match weekly patterns
-    const ppvExceptions = [
-      /saturday\s*night'?s\s*main\s*event/i, // This is a PPV, not weekly
-      /world\s*tag\s*league\s*finals/i, // NJPW PPV
-    ];
-    if (ppvExceptions.some(pattern => pattern.test(eventName))) {
-      return false; // It's a PPV, not a weekly show
-    }
-    
     const weeklyPatterns = [
       /dynamite/i,
       /collision/i,
@@ -3216,12 +2577,14 @@ export default function RingsidePickemFinal() {
       /raw/i,
       /smackdown/i,
       /nxt(?!\s*(takeover|stand|deliver|deadline|vengeance|battleground))/i, // NXT but not TakeOver, Stand & Deliver, etc.
+      /main\s*event/i,
       /superstars/i,
       /thunder/i,
       /nitro/i,
       /impact(?!\s*(slammiversary|bound|hard|sacrifice|rebellion|against|genesis))/i,
       /dark(?:\s|$)/i, // AEW Dark but not Darkest or similar
       /elevation/i,
+      /world\s*tag/i,
       /strong/i, // NJPW Strong
       /road\s*to/i,
     ];
@@ -3248,45 +2611,14 @@ export default function RingsidePickemFinal() {
       
       // Merge scraped events with initial events
       const merged = scrapedEvents.map(scrapedEv => {
-        // Try to find matching INITIAL_EVENT by ID first, then by normalized name
-        const matchingInitial = initialEventsMap[scrapedEv.id];
+        // Try to find matching INITIAL_EVENT
+        const normalizedName = scrapedEv.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const matchingInitial = initialEventsMap[normalizedName] || initialEventsMap[scrapedEv.id];
         
-        // If no exact ID match, try normalized name matching
-        if (!matchingInitial) {
-          const normalizedName = scrapedEv.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-          // Try exact match first
-          let match = initialEventsMap[normalizedName];
-          
-          // If no exact match, try partial matching (for events like "Survivor Series" vs "Survivor Series: WarGames 2025")
-          if (!match && normalizedName.length >= 8) {
-            // Find INITIAL_EVENT where the name contains or is contained in the scraped name
-            for (const [key, initialEv] of Object.entries(initialEventsMap)) {
-              if (typeof initialEv === 'object' && initialEv.name) {
-                const initialNormalized = initialEv.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-                // Check if one contains the other (for similar event names)
-                if ((normalizedName.includes(initialNormalized) || initialNormalized.includes(normalizedName)) &&
-                    Math.abs(normalizedName.length - initialNormalized.length) <= 15) {
-                  match = initialEv;
-                  break;
-                }
-              }
-            }
-          }
-          
-          if (match) {
-            // If scraped event has no matches but we have hardcoded ones, use those
-            if ((!scrapedEv.matches || scrapedEv.matches.length === 0) && match.matches && match.matches.length > 0) {
-              return { ...scrapedEv, matches: match.matches };
-            }
-          }
-        } else {
-          // Exact ID match found
-          // If scraped event has no matches but we have hardcoded ones, use those
-          if ((!scrapedEv.matches || scrapedEv.matches.length === 0) && matchingInitial.matches && matchingInitial.matches.length > 0) {
-            return { ...scrapedEv, matches: matchingInitial.matches };
-          }
+        // If scraped event has no matches but we have hardcoded ones, use those
+        if ((!scrapedEv.matches || scrapedEv.matches.length === 0) && matchingInitial?.matches) {
+          return { ...scrapedEv, matches: matchingInitial.matches };
         }
-        
         return scrapedEv;
       });
       
@@ -3307,49 +2639,8 @@ export default function RingsidePickemFinal() {
     
     const eventsToUse = mergeEvents();
     
-    // Filter out "Saturday Night's Main Event" and remove duplicates
-    const filteredEvents = eventsToUse
-      .filter(ev => !/saturday\s*night'?s\s*main\s*event/i.test(ev.name))
-      .filter((ev, index, self) => {
-        // Remove duplicates by checking ID, normalized name, and date
-        const normalizedName = ev.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const evDate = ev.date;
-        
-        return index === self.findIndex(e => {
-          // Exact ID match = duplicate
-          if (e.id === ev.id) return true;
-          
-          // Same date and very similar names = likely duplicate
-          const otherNormalized = e.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-          if (e.date === evDate && evDate) {
-            // Check if one name contains the other (e.g., "Survivor Series" vs "Survivor Series: WarGames 2025")
-            const shorter = normalizedName.length < otherNormalized.length ? normalizedName : otherNormalized;
-            const longer = normalizedName.length >= otherNormalized.length ? normalizedName : otherNormalized;
-            
-            // If shorter name is at least 8 chars and is contained in longer, and they're on same date, likely duplicate
-            if (shorter.length >= 8 && longer.includes(shorter)) {
-              return true;
-            }
-            
-            // If normalized names are very similar (differ by <= 10 chars), likely duplicate
-            if (Math.abs(normalizedName.length - otherNormalized.length) <= 10) {
-              // Check if they share a significant portion
-              const minLen = Math.min(normalizedName.length, otherNormalized.length);
-              if (minLen >= 10) {
-                const sharedPrefix = normalizedName.substring(0, Math.min(10, minLen));
-                if (otherNormalized.startsWith(sharedPrefix)) {
-                  return true;
-                }
-              }
-            }
-          }
-          
-          return false;
-        });
-      });
-    
     // First filter by subscriptions
-    const subscribedEvents = filteredEvents.filter(ev => {
+    const subscribedEvents = eventsToUse.filter(ev => {
       // Match by promoId (wwe, aew, etc.) or by promotionId (1, 2287, etc.)
       return subs.includes(ev.promoId) || 
              (ev.promotionId && subs.some(sub => {
@@ -3358,62 +2649,50 @@ export default function RingsidePickemFinal() {
              }));
     });
     
-    // Helper to parse date string and normalize to start of day
+    // Helper to parse date string
     const parseDate = (dateStr) => {
       if (!dateStr) return new Date(9999, 11, 31); // Put events without dates at the end
       
-      let date;
       // Try DD.MM.YYYY format first
       const parts = dateStr.split('.');
       if (parts.length === 3) {
-        date = new Date(parts[2], parts[1] - 1, parts[0]);
-      } else {
-        // Try "Month DD, YYYY" format (e.g., "Nov 30, 2025")
-        date = new Date(dateStr);
-        if (isNaN(date.getTime())) {
-          return new Date(9999, 11, 31);
-        }
+        return new Date(parts[2], parts[1] - 1, parts[0]);
       }
       
-      // Normalize to start of day (midnight) for accurate comparison
-      date.setHours(0, 0, 0, 0);
-      return date;
+      // Try "Month DD, YYYY" format (e.g., "Nov 30, 2025")
+      const parsed = new Date(dateStr);
+      if (!isNaN(parsed.getTime())) {
+        return parsed;
+      }
+      
+      return new Date(9999, 11, 31);
     };
     
     // Filter by event type and date
     const today = new Date();
     today.setHours(0, 0, 0, 0); // Reset to start of day
     
-    // Calculate one month from today for limiting upcoming events
-    const oneMonthFromToday = new Date(today);
-    oneMonthFromToday.setMonth(oneMonthFromToday.getMonth() + 1);
-    
-    const typeFilteredEvents = subscribedEvents.filter(ev => {
+    const filteredEvents = subscribedEvents.filter(ev => {
       const isWeekly = isWeeklyShow(ev.name);
       const eventDate = parseDate(ev.date);
-      // Event is past if its date is before today (not including today)
-      // So if event is Nov 25 and today is Nov 26, it's past ✓
-      // If event is Nov 25 and today is Nov 25, it's still upcoming (happening today)
       const isPast = eventDate < today;
-      // Event is within one month if it's today or in the future, but not more than 1 month away
-      const isWithinOneMonth = eventDate >= today && eventDate <= oneMonthFromToday;
       
-      if (eventTypeFilter === EVENT_TYPES.PAST) {
-        return isPast; // Past events (both PPVs and weekly shows, no date limit)
-      } else if (eventTypeFilter === EVENT_TYPES.WEEKLY) {
-        return !isPast && isWeekly && isWithinOneMonth; // Upcoming weekly shows within 1 month
+      if (eventTypeFilter === 'past') {
+        return isPast && !isWeekly; // Past PPVs only
+      } else if (eventTypeFilter === 'weekly') {
+        return !isPast && isWeekly; // Upcoming weekly shows
       } else {
-        return !isPast && !isWeekly && isWithinOneMonth; // Upcoming PPVs within 1 month (default)
+        return !isPast && !isWeekly; // Upcoming PPVs (default)
       }
     });
     
     // Sort by date
     // For past events: most recent first (descending)
     // For upcoming events: soonest first (ascending)
-    return typeFilteredEvents.sort((a, b) => {
+    return filteredEvents.sort((a, b) => {
       const dateA = parseDate(a.date);
       const dateB = parseDate(b.date);
-      return eventTypeFilter === EVENT_TYPES.PAST ? dateB - dateA : dateA - dateB;
+      return eventTypeFilter === 'past' ? dateB - dateA : dateA - dateB;
     });
   }, [userProfile, scrapedEvents, eventTypeFilter]);
 
@@ -3445,12 +2724,12 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
   }
 
   // --- VIEW: LOADING ---
-  if (authLoading || viewState === VIEW_STATES.LOADING) {
+  if (authLoading || viewState === 'loading') {
     return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Activity className="animate-spin text-red-600" /></div>;
   }
 
   // --- VIEW: LOGIN ---
-  if (viewState === VIEW_STATES.LOGIN) {
+  if (viewState === 'login') {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col p-6 animate-fadeIn relative overflow-hidden">
          <div className="absolute top-0 left-0 w-full h-2/3 bg-gradient-to-b from-red-900/20 to-slate-950 z-0"></div>
@@ -3468,9 +2747,9 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
             {/* Auth Mode Tabs */}
             <div className="flex gap-2 mb-6 bg-slate-900/50 p-1 rounded-xl border border-slate-800">
               <button
-                onClick={() => { setAuthMode(AUTH_MODES.GUEST); setLoginError(null); }}
+                onClick={() => { setAuthMode('guest'); setLoginError(null); }}
                 className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold transition-all ${
-                  authMode === AUTH_MODES.GUEST 
+                  authMode === 'guest' 
                     ? 'bg-red-600 text-white' 
                     : 'text-slate-400 hover:text-white'
                 }`}
@@ -3478,9 +2757,9 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                 Guest
               </button>
               <button
-                onClick={() => { setAuthMode(AUTH_MODES.SIGNIN); setLoginError(null); }}
+                onClick={() => { setAuthMode('signin'); setLoginError(null); }}
                 className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold transition-all ${
-                  authMode === AUTH_MODES.SIGNIN 
+                  authMode === 'signin' 
                     ? 'bg-red-600 text-white' 
                     : 'text-slate-400 hover:text-white'
                 }`}
@@ -3488,9 +2767,9 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                 Sign In
               </button>
               <button
-                onClick={() => { setAuthMode(AUTH_MODES.SIGNUP); setLoginError(null); }}
+                onClick={() => { setAuthMode('signup'); setLoginError(null); }}
                 className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold transition-all ${
-                  authMode === AUTH_MODES.SIGNUP 
+                  authMode === 'signup' 
                     ? 'bg-red-600 text-white' 
                     : 'text-slate-400 hover:text-white'
                 }`}
@@ -3511,7 +2790,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                )}
 
                {/* Guest Login */}
-               {authMode === AUTH_MODES.GUEST && (
+               {authMode === 'guest' && (
                  <>
                    <button 
                      onClick={handleGuestLogin}
@@ -3551,7 +2830,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                )}
 
                {/* Sign In Form */}
-               {authMode === AUTH_MODES.SIGNIN && (
+               {authMode === 'signin' && (
                  <div className="space-y-4">
                    <div>
                      <input
@@ -3617,7 +2896,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                )}
 
                {/* Sign Up Form */}
-               {authMode === AUTH_MODES.SIGNUP && (
+               {authMode === 'signup' && (
                  <div className="space-y-4">
                    <div>
                      <input
@@ -3663,11 +2942,9 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                    <button
                      onClick={handleEmailSignUp}
                      disabled={isLoggingIn}
-                     aria-label="Create account"
-                     aria-busy={isLoggingIn}
-                     className="w-full bg-red-600 hover:bg-red-700 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-3 transition-all disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-slate-950"
+                     className="w-full bg-red-600 hover:bg-red-700 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-3 transition-all disabled:opacity-50"
                    >
-                     {isLoggingIn ? <Loader2 className="animate-spin" aria-hidden="true" /> : 'Create Account'}
+                     {isLoggingIn ? <Loader2 className="animate-spin" /> : 'Create Account'}
                    </button>
                    
                    <div className="flex items-center gap-3 my-4">
@@ -3704,7 +2981,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
   }
 
   // --- VIEW: ONBOARDING ---
-  if (viewState === VIEW_STATES.ONBOARDING) {
+  if (viewState === 'onboarding') {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col p-6 animate-fadeIn">
          {onboardingPage === 1 && (
@@ -3801,42 +3078,36 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
             <div className="flex items-center justify-between">
               <div className="flex p-1 bg-slate-900 rounded-xl border border-slate-800">
                 <button 
-                  onClick={() => setEventTypeFilter(EVENT_TYPES.PPV)}
-                  aria-label="Show PPV events"
-                  aria-pressed={eventTypeFilter === EVENT_TYPES.PPV}
-                  className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-slate-900 ${
-                    eventTypeFilter === EVENT_TYPES.PPV 
+                  onClick={() => setEventTypeFilter('ppv')}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all flex items-center gap-2 ${
+                    eventTypeFilter === 'ppv' 
                       ? 'bg-red-600 text-white shadow-lg' 
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  <Trophy size={14} aria-hidden="true" />
+                  <Trophy size={14} />
                   PPVs
                 </button>
                 <button 
-                  onClick={() => setEventTypeFilter(EVENT_TYPES.WEEKLY)}
-                  aria-label="Show weekly events"
-                  aria-pressed={eventTypeFilter === EVENT_TYPES.WEEKLY}
-                  className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 focus:ring-offset-slate-900 ${
-                    eventTypeFilter === EVENT_TYPES.WEEKLY 
+                  onClick={() => setEventTypeFilter('weekly')}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all flex items-center gap-2 ${
+                    eventTypeFilter === 'weekly' 
                       ? 'bg-blue-600 text-white shadow-lg' 
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  <Tv size={14} aria-hidden="true" />
+                  <Tv size={14} />
                   Weekly
                 </button>
                 <button 
-                  onClick={() => setEventTypeFilter(EVENT_TYPES.PAST)}
-                  aria-label="Show past events"
-                  aria-pressed={eventTypeFilter === EVENT_TYPES.PAST}
-                  className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-purple-600 focus:ring-offset-2 focus:ring-offset-slate-900 ${
-                    eventTypeFilter === EVENT_TYPES.PAST 
+                  onClick={() => setEventTypeFilter('past')}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all flex items-center gap-2 ${
+                    eventTypeFilter === 'past' 
                       ? 'bg-purple-600 text-white shadow-lg' 
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  <Clock size={14} aria-hidden="true" />
+                  <Clock size={14} />
                   Past
                 </button>
               </div>
@@ -3851,22 +3122,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                 const hasMatchWinners = event.matches?.some(m => m.winner);
                 const isGraded = hasEventResults || hasMatchWinners;
                 return (
-                  <div 
-                    key={event.id} 
-                    onClick={() => { setSelectedEvent(event); setActiveTab('event'); }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        setSelectedEvent(event);
-                        setActiveTab('event');
-                      }
-                    }}
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`View ${event.name} event`}
-                    className="group relative bg-slate-900 hover:bg-slate-800 border border-slate-800 transition-all cursor-pointer rounded-2xl overflow-hidden shadow-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-slate-950" 
-                    style={{ height: '200px' }}
-                  >
+                  <div key={event.id} onClick={() => { setSelectedEvent(event); setActiveTab('event'); }} className="group relative bg-slate-900 hover:bg-slate-800 border border-slate-800 transition-all cursor-pointer rounded-2xl overflow-hidden shadow-xl" style={{ height: '200px' }}>
                     <div className="absolute inset-0"><EventBanner event={event} className="w-full h-full object-cover opacity-60 group-hover:opacity-40 transition-opacity duration-500 group-hover:scale-105" /><div className="absolute inset-0 bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950"></div></div>
                     <div className="absolute inset-0 p-5 flex flex-col justify-end">
                       <div className="flex justify-between items-end">
@@ -3894,16 +3150,8 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                <Trophy className="mx-auto text-yellow-500 mb-2 w-8 h-8 drop-shadow-lg" />
                <h2 className="text-2xl font-black text-white mb-4">Rankings</h2>
                <div className="flex p-1 bg-slate-950 rounded-lg border border-slate-800">
-                  {[LEADERBOARD_SCOPES.GLOBAL, LEADERBOARD_SCOPES.COUNTRY, LEADERBOARD_SCOPES.REGION, LEADERBOARD_SCOPES.FRIENDS].map(scope => (
-                    <button 
-                      key={scope} 
-                      onClick={() => setLeaderboardScope(scope)}
-                      aria-label={`Filter leaderboard by ${scope}`}
-                      aria-pressed={leaderboardScope === scope}
-                      className={`flex-1 py-1.5 rounded-md text-[10px] font-bold uppercase transition-all focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-slate-900 ${leaderboardScope === scope ? 'bg-slate-800 text-white shadow' : 'text-slate-500'}`}
-                    >
-                      {scope}
-                    </button>
+                  {['global', 'country', 'region', 'friends'].map(scope => (
+                    <button key={scope} onClick={() => setLeaderboardScope(scope)} className={`flex-1 py-1.5 rounded-md text-[10px] font-bold uppercase transition-all ${leaderboardScope === scope ? 'bg-slate-800 text-white shadow' : 'text-slate-500'}`}>{scope}</button>
                   ))}
                </div>
             </div>
@@ -3928,7 +3176,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                </div>
             </div>
             
-            {leaderboardScope === LEADERBOARD_SCOPES.FRIENDS && (
+            {leaderboardScope === 'friends' && (
                <div className="text-center">
                   <button className="text-xs font-bold text-slate-500 hover:text-white flex items-center justify-center gap-2 mx-auto">
                      <UserPlus size={14} /> Invite Friends
@@ -3952,36 +3200,14 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                 // CRITICAL: Only show predictions if they belong to the current user
                 // Must be exact match - null means we haven't loaded predictions yet, so don't show any
                 // Also check that predictions object has entries for this user (extra safety)
-                // CRITICAL: Use auth.currentUser as source of truth, not user state which can be stale
-                const currentAuthUser = auth.currentUser;
-                const currentUserUid = currentAuthUser?.uid || user?.uid; // Fallback to state if auth.currentUser is null
+                const currentUserUid = user?.uid;
                 
                 // CRITICAL: Get predictions from user-keyed structure
                 // This ensures we only access the current user's predictions
                 const getMyPickData = () => {
-                  // CRITICAL: Block access if predictions are still loading
-                  if (predictionsLoading) {
-                    devLog('🔒 Predictions still loading - blocking access');
-                    return undefined;
-                  }
-                  
                   // CRITICAL: Verify user ID matches before accessing predictions
                   if (!currentUserUid) {
-                    devLog('🔒 No current user - blocking prediction access', {
-                      authUser: currentAuthUser?.uid,
-                      stateUser: user?.uid,
-                      refUser: currentUserIdRef.current
-                    });
-                    return undefined;
-                  }
-                  
-                  // CRITICAL: Verify auth.currentUser matches (if available)
-                  if (currentAuthUser && currentAuthUser.uid !== currentUserUid) {
-                    console.error('🔒 CRITICAL: auth.currentUser mismatch in getMyPickData!', {
-                      authUserUid: currentAuthUser.uid,
-                      currentUserUid,
-                      stateUserUid: user?.uid
-                    });
+                    console.log('🔒 No current user - blocking prediction access');
                     return undefined;
                   }
                   
@@ -3999,7 +3225,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                   }
                   
                   if (predictionsUserId === null) {
-                    devLog('🔒 predictionsUserId is null - predictions not loaded yet');
+                    console.log('🔒 predictionsUserId is null - predictions not loaded yet');
                     return undefined;
                   }
                   
@@ -4019,38 +3245,21 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                   // CRITICAL: Access predictionsByUser directly using currentUserUid to avoid stale state
                   // Don't rely on getCurrentUserPredictions() which might use stale user state
                   const matchIdStr = match.id.toString();
-                  
-                  // FINAL SAFETY CHECK: Verify predictionsByUser only contains current user
-                  const predictionsByUserKeys = Object.keys(predictionsByUser);
-                  if (predictionsByUserKeys.length > 1) {
-                    console.error('🔒 CRITICAL: Multiple users in predictionsByUser! Blocking access.', {
-                      currentUserUid,
-                      allUserKeys: predictionsByUserKeys,
-                      eventId: selectedEvent.id,
-                      matchId: matchIdStr
-                    });
-                    // Clear all other users' data immediately
-                    setPredictionsByUser(prev => ({
-                      [currentUserUid]: prev[currentUserUid] || {}
-                    }));
-                    return undefined; // Don't show any predictions if there's contamination
-                  }
-                  
-                  // If predictionsByUser contains a different user, block access
-                  if (predictionsByUserKeys.length === 1 && predictionsByUserKeys[0] !== currentUserUid) {
-                    console.error('🔒 CRITICAL: predictionsByUser contains wrong user! Blocking access.', {
-                      currentUserUid,
-                      storedUserKey: predictionsByUserKeys[0],
-                      eventId: selectedEvent.id,
-                      matchId: matchIdStr
-                    });
-                    // Clear the wrong user's data immediately
-                    setPredictionsByUser({});
-                    return undefined;
-                  }
-                  
                   const userPredictions = predictionsByUser[currentUserUid] || {};
                   const pickData = userPredictions[selectedEvent.id]?.[matchIdStr];
+                  
+                  // Only log if there's a potential issue
+                  if (pickData && process.env.NODE_ENV === 'development') {
+                    const predictionsByUserKeys = Object.keys(predictionsByUser);
+                    if (predictionsByUserKeys.length > 1) {
+                      console.warn('⚠️ Multiple users in predictionsByUser:', {
+                        currentUserUid,
+                        allUserKeys: predictionsByUserKeys,
+                        eventId: selectedEvent.id,
+                        matchId: matchIdStr
+                      });
+                    }
+                  }
                   
                   return pickData;
                 };
@@ -4078,47 +3287,21 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                 const myPickData = getMyPickData();
                 
                 // CRITICAL: Final validation - ensure we have a valid user and predictions belong to them
-                // Use auth.currentUser as the final source of truth
-                const finalCurrentUserId = currentAuthUser?.uid || currentUserUid;
-                
-                // CRITICAL: Block if predictions are still loading
-                if (predictionsLoading) {
+                if (myPickData && (!currentUserUid || predictionsUserId !== currentUserUid)) {
+                  console.error('🔒 CRITICAL: Blocking prediction display - user mismatch detected!', {
+                    hasPickData: !!myPickData,
+                    currentUserUid,
+                    predictionsUserId,
+                    matchId: matchIdStr,
+                    eventId: selectedEvent.id
+                  });
+                  // Force undefined to prevent showing wrong user's predictions
                   var myPick = undefined;
                   var myMethod = null;
                 } else {
-                  // CRITICAL: Additional check - verify predictionsByUser only contains current user
-                  const predictionsKeys = Object.keys(predictionsByUser);
-                  const hasWrongUser = predictionsKeys.some(key => key !== finalCurrentUserId);
-                  
-                  if (myPickData && (!finalCurrentUserId || predictionsUserId !== finalCurrentUserId || hasWrongUser)) {
-                    console.error('🔒 CRITICAL: Blocking prediction display - user mismatch detected!', {
-                      hasPickData: !!myPickData,
-                      currentUserUid,
-                      finalCurrentUserId,
-                      authUserUid: currentAuthUser?.uid,
-                      predictionsUserId,
-                      predictionsKeys,
-                      hasWrongUser,
-                      predictionsLoading,
-                      matchId: matchIdStr,
-                      eventId: selectedEvent.id
-                    });
-                    
-                    // If wrong user detected, clear immediately and block display
-                    if (hasWrongUser) {
-                      setPredictionsByUser({});
-                      setPredictionsUserId(null);
-                      setPredictionsLoading(true);
-                    }
-                    
-                    // Force undefined to prevent showing wrong user's predictions
-                    var myPick = undefined;
-                    var myMethod = null;
-                  } else {
-                    // Handle both old format (string) and new format (object)
-                    var myPick = myPickData ? (typeof myPickData === 'string' ? myPickData : (myPickData?.winner || myPickData)) : undefined;
-                    var myMethod = myPickData && typeof myPickData === 'object' ? myPickData?.method : null;
-                  }
+                  // Handle both old format (string) and new format (object)
+                  var myPick = myPickData ? (typeof myPickData === 'string' ? myPickData : (myPickData?.winner || myPickData)) : undefined;
+                  var myMethod = myPickData && typeof myPickData === 'object' ? myPickData?.method : null;
                 }
                 // FIXED: Use string key consistently
                 // For past events, check if match has a winner field from scraper
@@ -4423,13 +3606,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                              {actualWinner === match.p1 && <div className="absolute top-2 left-2 bg-green-500 text-black text-[10px] font-black px-2 py-1 rounded uppercase shadow-lg z-20">Winner</div>}
                           </div>
                           <div className="w-1 bg-slate-900 flex items-center justify-center relative z-20"><div className="absolute bg-slate-950 border border-slate-700 rounded-full w-8 h-8 flex items-center justify-center text-[10px] font-black text-slate-500 italic shadow-xl">VS</div></div>
-                          <button
-                            onClick={() => !actualWinner && makePrediction(selectedEvent.id, match.id, match.p2, selectedMethod[matchKey] || 'pinfall')}
-                            disabled={!!actualWinner}
-                            aria-label={`Pick ${match.p2} to win`}
-                            aria-pressed={myPick === match.p2}
-                            className={`flex-1 relative rounded-r-2xl overflow-hidden cursor-pointer transition-all duration-300 border-y border-r focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:cursor-not-allowed ${myPick === match.p2 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800 hover:border-slate-600'} ${actualWinner && actualWinner !== match.p2 ? 'grayscale opacity-50' : ''}`}
-                          >
+                          <div onClick={() => !actualWinner && makePrediction(selectedEvent.id, match.id, match.p2, selectedMethod[matchKey] || 'pinfall')} className={`flex-1 relative rounded-r-2xl overflow-hidden cursor-pointer transition-all duration-300 border-y border-r ${myPick === match.p2 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800 hover:border-slate-600'} ${actualWinner && actualWinner !== match.p2 ? 'grayscale opacity-50' : ''}`}>
                              {match.p2Members && match.p2Members.length === 2 ? (
                                <div className="w-full h-full grid grid-cols-2 gap-0.5">
                                  {match.p2Members.map((member, idx) => (
@@ -4617,8 +3794,8 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                   <button
                     onClick={() => {
                       handleLogout();
-                      setViewState(VIEW_STATES.LOGIN);
-                      setAuthMode(AUTH_MODES.SIGNUP);
+                      setViewState('login');
+                      setAuthMode('signup');
                     }}
                     className="w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg text-sm font-bold transition-colors"
                   >
@@ -4643,33 +3820,9 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
 
       <div className="fixed bottom-0 left-0 w-full bg-slate-900/90 backdrop-blur-md border-t border-slate-800 pb-safe md:pb-0 z-50">
         <div className="flex justify-around items-center h-16 max-w-md mx-auto">
-          <button 
-            onClick={() => setActiveTab('home')}
-            aria-label="Events tab"
-            aria-pressed={activeTab === 'home'}
-            className={`flex flex-col items-center gap-1 w-16 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-slate-950 rounded-lg p-1 ${activeTab === 'home' ? 'text-red-500' : 'text-slate-500'}`}
-          >
-            <Calendar size={20} strokeWidth={2.5} aria-hidden="true" />
-            <span className="text-[8px] uppercase font-bold mt-1">Events</span>
-          </button>
-          <button 
-            onClick={() => setActiveTab('leaderboard')}
-            aria-label="Rankings tab"
-            aria-pressed={activeTab === 'leaderboard'}
-            className={`flex flex-col items-center gap-1 w-16 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-slate-950 rounded-lg p-1 ${activeTab === 'leaderboard' ? 'text-red-500' : 'text-slate-500'}`}
-          >
-            <BarChart3 size={20} strokeWidth={2.5} aria-hidden="true" />
-            <span className="text-[8px] uppercase font-bold mt-1">Rankings</span>
-          </button>
-          <button 
-            onClick={() => setActiveTab('settings')}
-            aria-label="Settings tab"
-            aria-pressed={activeTab === 'settings'}
-            className={`flex flex-col items-center gap-1 w-16 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-slate-950 rounded-lg p-1 ${activeTab === 'settings' ? 'text-red-500' : 'text-slate-500'}`}
-          >
-            <Settings size={20} strokeWidth={2.5} aria-hidden="true" />
-            <span className="text-[8px] uppercase font-bold mt-1">Config</span>
-          </button>
+          <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center gap-1 w-16 ${activeTab === 'home' ? 'text-red-500' : 'text-slate-500'}`}><Calendar size={20} strokeWidth={2.5} /><span className="text-[8px] uppercase font-bold mt-1">Events</span></button>
+          <button onClick={() => setActiveTab('leaderboard')} className={`flex flex-col items-center gap-1 w-16 ${activeTab === 'leaderboard' ? 'text-red-500' : 'text-slate-500'}`}><BarChart3 size={20} strokeWidth={2.5} /><span className="text-[8px] uppercase font-bold mt-1">Rankings</span></button>
+          <button onClick={() => setActiveTab('settings')} className={`flex flex-col items-center gap-1 w-16 ${activeTab === 'settings' ? 'text-red-500' : 'text-slate-500'}`}><Settings size={20} strokeWidth={2.5} /><span className="text-[8px] uppercase font-bold mt-1">Config</span></button>
         </div>
       </div>
        <style>{`
