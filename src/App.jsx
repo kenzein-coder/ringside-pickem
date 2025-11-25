@@ -64,13 +64,6 @@ const firebaseConfig = {
     appId: import.meta.env.VITE_FIREBASE_APP_ID
   };
 
-// Debug: Log Firebase config (without exposing full keys)
-console.log('🔧 Firebase Config Check:', {
-  apiKey: firebaseConfig.apiKey ? `${firebaseConfig.apiKey.substring(0, 10)}...` : 'MISSING',
-  authDomain: firebaseConfig.authDomain || 'MISSING',
-  projectId: firebaseConfig.projectId || 'MISSING',
-});
-
 // Validate Firebase config
 let firebaseError = null;
 let app, auth, db;
@@ -88,7 +81,6 @@ try {
   app = initializeApp(firebaseConfig);
   auth = getAuth(app);
   db = getFirestore(app);
-  console.log('✅ Firebase initialized successfully');
 } catch (error) {
   console.error('❌ Firebase initialization error:', error);
   firebaseError = error.message;
@@ -175,7 +167,6 @@ const WRESTLER_IMAGES = {
   'House of Black': 'https://upload.wikimedia.org/wikipedia/commons/b/ba/Malakai_Black_AEW.jpg',
   'The Acclaimed': 'https://upload.wikimedia.org/wikipedia/commons/4/4d/The_Acclaimed_2022.jpg',
   'FTR': 'https://upload.wikimedia.org/wikipedia/commons/7/73/The_Revival_WM_Axxess_2017.jpg',
-  'Young Bucks': 'https://upload.wikimedia.org/wikipedia/commons/6/66/The_Young_Bucks_April_2017.jpg',
   'The Young Bucks': 'https://upload.wikimedia.org/wikipedia/commons/6/66/The_Young_Bucks_April_2017.jpg',
   
   // Legends
@@ -183,30 +174,6 @@ const WRESTLER_IMAGES = {
   'Stone Cold Steve Austin': 'https://upload.wikimedia.org/wikipedia/commons/8/80/Stone_Cold_Steve_Austin_2011.jpg',
   'The Ultimate Warrior': 'https://upload.wikimedia.org/wikipedia/commons/c/c7/Ultimate_Warrior_in_1991.jpg',
   'Ric Flair': 'https://upload.wikimedia.org/wikipedia/commons/8/8c/Ric_Flair_2014.jpg',
-};
-
-// Using picsum.photos for reliable placeholder images (no CORS issues)
-const EVENT_BACKGROUNDS = {
-  'wwe-survivor-2025': 'https://picsum.photos/seed/wwe-survivor/800/400',
-  'aew-worlds-end-2025': 'https://picsum.photos/seed/aew-worlds/800/400', 
-  'njpw-wk20': 'https://picsum.photos/seed/njpw-wk20/800/400', 
-  'tna-hardto-2026': 'https://picsum.photos/seed/tna-hard/800/400',
-  'roh-final-battle-2025': 'https://picsum.photos/seed/roh-final/800/400',
-  'default': 'https://picsum.photos/seed/wrestling/800/400'
-};
-
-// Logo URLs - using null to trigger text fallback (more reliable than broken images)
-const LOGO_URLS = {
-  wwe: null,
-  aew: null,
-  njpw: null,
-  tna: null,
-  roh: null,
-  stardom: null,
-  cmll: null,
-  aaa: null,
-  gcw: null,
-  mlw: null
 };
 
 const PROMOTIONS = [
@@ -437,11 +404,9 @@ export default function RingsidePickemFinal() {
   // Track previous user ID to detect changes
   const previousUserIdRef = useRef(null);
   
-  // CRITICAL: Extra safety - clear ALL user data when user ID changes
+  // Clear ALL user data when user ID changes
   useEffect(() => {
     if (user?.uid !== previousUserIdRef.current) {
-      console.log('🔄 User ID changed:', previousUserIdRef.current, '->', user?.uid);
-      // Force clear all user-specific state
       setPredictions({});
       setCommunitySentiment({});
       setSelectedMethod({});
@@ -459,23 +424,17 @@ export default function RingsidePickemFinal() {
     }
     
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      console.log('🔐 Auth state changed. New user:', currentUser?.uid || 'null');
-      
-      // CRITICAL: Clear all user data IMMEDIATELY when auth state changes
-      // This prevents showing data from the previous user
-      console.log('🧹 Clearing all user data on auth state change');
-      currentUserIdRef.current = null; // Clear ref first
+      // Clear all user data when auth state changes
+      currentUserIdRef.current = null;
       setPredictions({});
       setUserProfile(null);
       setCommunitySentiment({});
       setSelectedMethod({});
-      setPredictionsUserId(null); // Clear the user ID tracker
+      setPredictionsUserId(null);
       
       setUser(currentUser);
       
       if (currentUser) {
-        console.log('✅ User logged in:', currentUser.uid);
-        // Set ref immediately when user logs in
         currentUserIdRef.current = currentUser.uid;
         setUserId(currentUser.uid);
         setIsConnected(true);
@@ -484,22 +443,19 @@ export default function RingsidePickemFinal() {
           const profileSnap = await getDoc(profileRef);
           
           if (profileSnap.exists()) {
-            // CRITICAL: Ensure safe data structure immediately
             const data = profileSnap.data();
-            if (!data.subscriptions) data.subscriptions = []; // Safe default
+            if (!data.subscriptions) data.subscriptions = [];
             setUserProfile(data);
             setViewState('dashboard');
           } else {
-            console.log('📝 No profile found, going to onboarding');
             setViewState('onboarding');
             setOnboardingPage(1); 
           }
         } catch (e) {
-          console.error("❌ Profile check error:", e);
+          console.error("Profile check error:", e);
           setViewState('onboarding'); 
         }
       } else {
-        console.log('🚪 User logged out');
         setViewState('login');
         setUserId(null);
         setIsConnected(false);
@@ -521,13 +477,7 @@ export default function RingsidePickemFinal() {
       return;
     }
 
-    // CRITICAL: Clear predictions immediately when user changes to prevent showing old data
-    console.log('🧹 Clearing predictions state before setting up new listener');
-    console.log('🧹 Current predictions state before clear:', JSON.stringify(predictions));
-    console.log('🧹 Current user:', user?.uid);
-    console.log('🧹 Current predictionsUserId:', predictionsUserId);
-    
-    // Force clear - use functional update to ensure we get the latest state
+    // Clear predictions when user changes
     setPredictions(() => ({}));
     setCommunitySentiment(() => ({}));
     setSelectedMethod(() => ({}));
@@ -542,14 +492,8 @@ export default function RingsidePickemFinal() {
         }
     });
 
-    // Set up predictions listener for THIS specific user
-    // CRITICAL: Capture user.uid at setup time to avoid closure issues
+    // Set up predictions listener for current user
     const currentUserId = user.uid;
-    const predictionsPath = `artifacts/${appId}/users/${currentUserId}/predictions`;
-    console.log('🔔 Setting up predictions listener for user:', currentUserId);
-    console.log('📂 Listening to path:', predictionsPath);
-    
-    // Update ref immediately - this is always current
     currentUserIdRef.current = currentUserId;
     
     // Mark that we're now listening to this user's predictions
@@ -561,45 +505,23 @@ export default function RingsidePickemFinal() {
     const unsubPreds = onSnapshot(
       collection(db, 'artifacts', appId, 'users', currentUserId, 'predictions'), 
       (snap) => {
-        // CRITICAL: Check ref first - this is always the most current user ID
-        const refUserId = currentUserIdRef.current;
-        if (refUserId !== currentUserId) {
-          console.log('⚠️  Ignoring predictions - user changed in ref. Expected:', currentUserId, 'Current ref:', refUserId);
+        // Ignore if user changed
+        if (currentUserIdRef.current !== currentUserId || !isListenerValid) {
           isListenerValid = false;
           return;
         }
         
-        // Also check if listener is still valid
-        if (!isListenerValid) {
-          console.log('⚠️  Ignoring predictions - listener invalidated');
-          return;
-        }
-        
-        // Final check against state
         setPredictionsUserId(prevUserId => {
           if (prevUserId !== currentUserId && prevUserId !== null) {
-            console.log('⚠️  Ignoring predictions - user changed in state. Expected:', currentUserId, 'Current state:', prevUserId);
             isListenerValid = false;
             return prevUserId;
           }
           
-          console.log('📥 Predictions snapshot received for user:', currentUserId, 'Count:', snap.size);
-          console.log('🔍 Full path being listened to:', `artifacts/${appId}/users/${currentUserId}/predictions`);
-          console.log('🔍 Current appId:', appId);
-          
           if (snap.empty) {
-            // Explicitly clear predictions if collection is empty
-            console.log('✅ No predictions found, clearing state');
             setPredictions({});
           } else {
             const preds = {}; 
-            snap.forEach(doc => { 
-              preds[doc.id] = doc.data();
-              console.log('📋 Loaded prediction for event:', doc.id, 'Full data:', JSON.stringify(doc.data()));
-            }); 
-            console.log('💾 Setting predictions state for user:', currentUserId, 'Events:', Object.keys(preds));
-            console.log('🔍 All prediction keys:', Object.keys(preds));
-            console.log('🔍 First prediction sample:', preds[Object.keys(preds)[0]]);
+            snap.forEach(doc => { preds[doc.id] = doc.data(); }); 
             setPredictions(preds);
           }
           
@@ -607,7 +529,7 @@ export default function RingsidePickemFinal() {
         });
       },
       (error) => {
-        console.error('❌ Error listening to predictions:', error);
+        console.error('Error listening to predictions:', error);
         if (isListenerValid) {
           setPredictions({});
           setPredictionsUserId(null);
@@ -615,9 +537,7 @@ export default function RingsidePickemFinal() {
       }
     );
     
-    // Wrap cleanup to mark listener as invalid
     const cleanupPredictions = () => {
-      console.log('🛑 Invalidating predictions listener for user:', currentUserId);
       isListenerValid = false;
       unsubPreds();
     };
@@ -686,8 +606,6 @@ export default function RingsidePickemFinal() {
     });
 
     return () => {
-      console.log('🧹 Cleaning up listeners for user:', user?.uid);
-      // Clean up all listeners when user changes or component unmounts
       unsubProfile(); 
       if (typeof cleanupPredictions === 'function') {
         cleanupPredictions();
@@ -697,14 +615,12 @@ export default function RingsidePickemFinal() {
       unsubResults(); 
       unsubLb(); 
       unsubEvents();
-      // Also clear state to prevent stale data
-      console.log('🗑️  Clearing predictions state on cleanup');
       setPredictions({});
       setCommunitySentiment({});
       setSelectedMethod({});
       setPredictionsUserId(null);
     };
-  }, [viewState, user?.uid]); // Re-run when user.uid changes
+  }, [viewState, user?.uid]);
 
   // Calculate community sentiment when event is selected
   useEffect(() => {
@@ -1075,36 +991,16 @@ export default function RingsidePickemFinal() {
       return;
     }
     
-    console.log('✅ Making prediction for user:', user.uid, 'Event:', eventId, 'Match:', matchId, 'Winner:', winner);
-    
     const currentPreds = predictions[eventId] || {};
-    // Support both old format (string) and new format (object with winner and method)
     const newPreds = { 
       ...currentPreds, 
-      [matchId]: method ? {
-        winner: winner,
-        method: method
-      } : winner // Backward compatible: if no method, store as string
+      [matchId]: method ? { winner, method } : winner
     };
     setPredictions(prev => ({ ...prev, [eventId]: newPreds }));
     
-    const predictionPath = `artifacts/${appId}/users/${user.uid}/predictions/${eventId}`;
-    console.log('💾 Saving prediction to:', predictionPath);
-    console.log('🔍 User UID:', user.uid);
-    console.log('🔍 App ID:', appId);
-    console.log('🔍 Event ID:', eventId);
-    console.log('🔍 Prediction data:', JSON.stringify(newPreds));
-    console.log('🔍 Current predictionsUserId:', predictionsUserId);
-    
     setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'predictions', eventId), newPreds, { merge: true })
-      .then(() => {
-        console.log('✅ Prediction saved successfully to path:', predictionPath);
-        // Recalculate community sentiment after making a prediction
-        setTimeout(() => calculateCommunitySentiment(eventId), 1000);
-      })
-      .catch((error) => {
-        console.error('❌ Error saving prediction:', error);
-      });
+      .then(() => setTimeout(() => calculateCommunitySentiment(eventId), 1000))
+      .catch((error) => console.error('Error saving prediction:', error));
   };
 
   // Calculate community sentiment (pick percentages) for an event
@@ -1761,8 +1657,8 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
             ) : (
               myEvents.map(event => {
                 const promo = PROMOTIONS.find(p => p.id === event.promoId);
-                // Use scraped bannerUrl/posterUrl if available, otherwise fall back to hardcoded EVENT_BACKGROUNDS
-                const bgImage = event.bannerUrl || event.posterUrl || EVENT_BACKGROUNDS[event.id] || EVENT_BACKGROUNDS['default'];
+                // Use scraped bannerUrl/posterUrl if available, otherwise fall back to default
+                const bgImage = event.bannerUrl || event.posterUrl || `https://picsum.photos/seed/${event.id}/800/400`;
                 const isGraded = eventResults[event.id];
                 return (
                   <div key={event.id} onClick={() => { setSelectedEvent(event); setActiveTab('event'); }} className="group relative bg-slate-900 hover:bg-slate-800 border border-slate-800 transition-all cursor-pointer rounded-2xl overflow-hidden shadow-xl" style={{ height: '200px' }}>
@@ -1833,7 +1729,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
           <div className="pb-24 animate-slideUp">
             <button onClick={() => setActiveTab('home')} className="mb-4 text-slate-500 hover:text-white flex items-center gap-1 text-xs font-bold uppercase tracking-wider">← Feed</button>
             <div className="mb-6 relative h-48 rounded-2xl overflow-hidden shadow-2xl border border-slate-800">
-              <img src={selectedEvent.bannerUrl || selectedEvent.posterUrl || EVENT_BACKGROUNDS[selectedEvent.id] || EVENT_BACKGROUNDS['default']} className="w-full h-full object-cover opacity-50" referrerPolicy="no-referrer" onError={(e) => { e.target.style.display = 'none'; }} />
+              <img src={selectedEvent.bannerUrl || selectedEvent.posterUrl || `https://picsum.photos/seed/${selectedEvent.id}/800/400`} className="w-full h-full object-cover opacity-50" referrerPolicy="no-referrer" onError={(e) => { e.target.style.display = 'none'; }} />
               <div className="absolute inset-0 bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950 -z-10"></div>
               <div className="absolute inset-0 bg-gradient-to-t from-slate-950 to-transparent"></div>
               <div className="absolute bottom-0 left-0 p-6 w-full text-center"><div className="inline-block w-16 h-16 p-2 bg-slate-950/50 backdrop-blur-md rounded-xl border border-slate-700 mb-2 shadow-lg"><BrandLogo id={selectedEvent.promoId} /></div><h1 className="text-3xl font-black italic uppercase text-white shadow-black drop-shadow-lg">{selectedEvent.name}</h1></div>
@@ -1849,28 +1745,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                   user?.uid !== null &&
                   currentUserIdRef.current === user?.uid; // Extra check using ref
                 
-                // Log what we're seeing for debugging
-                if (predictions[selectedEvent.id]?.[match.id]) {
-                  console.log('🔍 Checking prediction:', {
-                    hasPrediction: !!predictions[selectedEvent.id]?.[match.id],
-                    predictionsUserId,
-                    currentUserId: user?.uid,
-                    belongsToUser: predictionsBelongToCurrentUser,
-                    eventId: selectedEvent.id,
-                    matchId: match.id
-                  });
-                  
-                  if (!predictionsBelongToCurrentUser) {
-                    console.warn('⚠️  BLOCKING prediction display - does not belong to current user!', {
-                      predictionsUserId,
-                      currentUserId: user?.uid,
-                      eventId: selectedEvent.id,
-                      matchId: match.id
-                    });
-                  }
-                }
-                
-                // Only use predictions if they belong to current user - otherwise force undefined
+                // Only use predictions if they belong to current user
                 const myPickData = predictionsBelongToCurrentUser ? (predictions[selectedEvent.id]?.[match.id]) : undefined;
                 // Handle both old format (string) and new format (object)
                 const myPick = myPickData ? (typeof myPickData === 'string' ? myPickData : (myPickData?.winner || myPickData)) : undefined;

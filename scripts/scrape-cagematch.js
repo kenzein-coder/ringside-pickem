@@ -935,12 +935,6 @@ async function main() {
     }
     
     console.log('\n✅ Scraping complete!');
-    console.log('\n📝 Next steps:');
-    console.log('1. Inspect the raw HTML files in data/ directory');
-    console.log('2. Adjust parseHTML() function to match actual Cagematch.net structure');
-    console.log('3. Add parsing for dates, venues, and match cards');
-    console.log('4. Set up scheduled runs (Vercel Cron or Firebase Cloud Functions)');
-    console.log('5. Store data in Firestore instead of JSON files');
     
   } catch (error) {
     console.error('❌ Fatal error:', error);
