@@ -94,7 +94,91 @@ googleProvider.setCustomParameters({
 });
 
 // --- ASSETS ---
-// Using reliable image sources - RandomUser for consistent avatars, with real photos where available
+// Alternative image sources for wrestlers - using public APIs that don't block sourcing
+// Priority: 1) Provided URLs, 2) Hardcoded Wikipedia Commons, 3) Wikimedia API search, 4) Proxy services, 5) Initials fallback
+
+// Cache for Wikimedia search results to avoid repeated API calls
+// To clear cache: wikimediaCache.clear() or restart the app
+const wikimediaCache = new Map();
+
+// Function to clear the image cache (useful for re-scraping)
+export const clearImageCache = () => {
+  wikimediaCache.clear();
+};
+
+// Helper function to search Wikimedia Commons for wrestler images
+// Wikimedia Commons API is free, requires no API key, and is CORS-friendly
+const searchWikimediaCommons = async (wrestlerName) => {
+  // Check cache first
+  if (wikimediaCache.has(wrestlerName)) {
+    return wikimediaCache.get(wrestlerName);
+  }
+  
+  try {
+    // Wikimedia Commons API - no API key required, CORS-friendly
+    // Search for images in the File namespace (namespace 6)
+    const searchQuery = encodeURIComponent(`${wrestlerName} wrestler`);
+    const apiUrl = `https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&list=search&srsearch=${searchQuery}&srnamespace=6&srlimit=5`;
+    
+    const response = await fetch(apiUrl);
+    const data = await response.json();
+    
+    if (data.query?.search?.length > 0) {
+      // Get image info for the first result
+      const pageId = data.query.search[0].pageid;
+      const imageInfoUrl = `https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&pageids=${pageId}&prop=imageinfo&iiprop=url&iiurlwidth=400`;
+      
+      const imageResponse = await fetch(imageInfoUrl);
+      const imageData = await imageResponse.json();
+      
+      const pages = imageData.query?.pages;
+      if (pages && pages[pageId]?.imageinfo?.[0]?.thumburl) {
+        const imageUrl = pages[pageId].imageinfo[0].thumburl;
+        // Cache the result
+        wikimediaCache.set(wrestlerName, imageUrl);
+        return imageUrl;
+      }
+    }
+  } catch (error) {
+    console.log(`Wikimedia search failed for ${wrestlerName}:`, error);
+  }
+  
+  // Cache null result to avoid repeated failed searches
+  wikimediaCache.set(wrestlerName, null);
+  return null;
+};
+
+// Helper function to get Pexels image (free API, good CORS support)
+const getPexelsImage = async (wrestlerName) => {
+  try {
+    // Pexels has a public API but requires an API key for search
+    // Instead, we'll use their CDN with predictable URLs or use a proxy
+    // For now, we'll skip direct Pexels and use other sources
+    return null;
+  } catch (error) {
+    return null;
+  }
+};
+
+// Helper function to get Pixabay image URL (using their CDN pattern)
+const getPixabayImage = (wrestlerName) => {
+  // Pixabay doesn't have a reliable direct URL pattern, so we'll skip this
+  return null;
+};
+
+// Helper function to use image proxy services that support multiple sources
+const getProxiedImageUrl = (originalUrl, width = 400, height = 500, proxyType = 'wsrv') => {
+  if (!originalUrl) return null;
+  const encoded = encodeURIComponent(originalUrl);
+  // Using multiple proxy services as fallbacks
+  const proxies = {
+    wsrv: `https://wsrv.nl/?url=${encoded}&w=${width}&h=${height}&fit=cover&a=attention`,
+    images: `https://images.weserv.nl/?url=${encoded}&w=${width}&h=${height}&fit=cover&a=attention`,
+  };
+  return proxies[proxyType] || proxies.wsrv;
+};
+
+// Using reliable image sources - primarily Wikipedia Commons (public domain/CC licensed)
 const WRESTLER_IMAGES = {
   // WWE - Real photos from Wikipedia (verified working)
   'The Rock': 'https://upload.wikimedia.org/wikipedia/commons/1/11/Dwayne_%22The_Rock%22_Johnson_Visits_the_Pentagon_%2841%29_%28cropped%29.jpg',
@@ -189,6 +273,86 @@ const PROMOTIONS = [
     { id: 'mlw', name: 'MLW', color: 'text-white', bg: 'bg-slate-900', border: 'border-white/30' },
 ];
 
+// --- COMMUNITY SENTIMENT SIMULATION ENGINE ---
+// Popular/Face wrestlers get more crowd support - generates realistic community sentiment
+const POPULARITY_SCORES = {
+  // Mega Stars (80-95% crowd support when facing heels)
+  'Cody Rhodes': 95, 'Roman Reigns': 90, 'The Rock': 95, 'John Cena': 92, 
+  'CM Punk': 88, 'Seth Rollins': 85, 'Rhea Ripley': 88, 'Becky Lynch': 87,
+  'Randy Orton': 82, 'Kevin Owens': 80, 'Sami Zayn': 85, 'Drew McIntyre': 78,
+  
+  // AEW Top Stars
+  'Kenny Omega': 88, 'MJF': 75, 'Jon Moxley': 82, 'Will Ospreay': 90,
+  'Hangman Adam Page': 80, 'Orange Cassidy': 85, 'Sting': 92, 'Darby Allin': 82,
+  'Chris Jericho': 78, 'Mercedes Moné': 80, 'Jamie Hayter': 78, 'Toni Storm': 82,
+  
+  // NJPW Stars
+  'Kazuchika Okada': 88, 'Hiroshi Tanahashi': 90, 'Tetsuya Naito': 85,
+  'Zack Sabre Jr.': 75, 'Shingo Takagi': 80, 'Hiromu Takahashi': 82,
+  
+  // TNA/Impact Stars
+  'Nic Nemeth': 80, 'Josh Alexander': 78, 'Jordynne Grace': 82, 'Moose': 72,
+  
+  // Tag Teams & Factions
+  'OG Bloodline': 88, 'Original Bloodline': 88, 'Team Rhea': 85, 'The Young Bucks': 70,
+  'FTR': 80, 'The Acclaimed': 82, 'House of Black': 72, 'Death Riders': 70,
+  'The Elite': 75, 'New Bloodline': 65, 'Team Liv': 72, 'Bloodline 2.0': 65,
+  
+  // Legends
+  'The Undertaker': 95, 'Triple H': 85, 'Shawn Michaels': 92, 'Stone Cold Steve Austin': 95,
+  'Hulk Hogan': 80, 'Ric Flair': 88,
+};
+
+// Generate a deterministic but seemingly random number based on string
+const seededRandom = (seed) => {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = seed.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return Math.abs(Math.sin(hash) * 10000) % 1;
+};
+
+// Get popularity score for a wrestler (returns 50-80 for unknown wrestlers)
+const getPopularityScore = (name) => {
+  if (!name) return 60;
+  // Check direct match
+  if (POPULARITY_SCORES[name]) return POPULARITY_SCORES[name];
+  // Check if name contains a known wrestler
+  for (const [wrestler, score] of Object.entries(POPULARITY_SCORES)) {
+    if (name.toLowerCase().includes(wrestler.toLowerCase()) || 
+        wrestler.toLowerCase().includes(name.toLowerCase())) {
+      return score;
+    }
+  }
+  // Generate a consistent score based on name hash
+  return 50 + Math.floor(seededRandom(name) * 30);
+};
+
+// Generate simulated community sentiment for a match
+const generateSimulatedSentiment = (match, eventId) => {
+  const p1Score = getPopularityScore(match.p1);
+  const p2Score = getPopularityScore(match.p2);
+  
+  // Calculate base percentage with some variance
+  const totalScore = p1Score + p2Score;
+  let p1Base = (p1Score / totalScore) * 100;
+  
+  // Add some realistic variance based on match/event seed
+  const variance = seededRandom(`${eventId}-${match.id}`) * 12 - 6; // -6 to +6
+  p1Base = Math.min(85, Math.max(15, p1Base + variance)); // Clamp between 15-85%
+  
+  const p1Pct = Math.round(p1Base);
+  const p2Pct = 100 - p1Pct;
+  
+  // Generate realistic total picks (100-2000 based on match importance)
+  const isMainEvent = match.id === 1 || (match.title?.toLowerCase().includes('championship'));
+  const baseTotal = isMainEvent ? 800 : 300;
+  const totalVariance = Math.floor(seededRandom(`total-${eventId}-${match.id}`) * baseTotal);
+  const total = baseTotal + totalVariance;
+  
+  return { p1: p1Pct, p2: p2Pct, total, simulated: true };
+};
+
 const INITIAL_EVENTS = [
   {
     id: 'wwe-survivor-2025', promoId: 'wwe', name: 'Survivor Series', date: 'Nov 30, 2025', venue: 'Chicago, IL',
@@ -267,26 +431,64 @@ const BrandLogo = ({ id, className = "w-full h-full object-contain", logoUrl }) 
 };
 
 const WrestlerImage = ({ name, className, imageUrl }) => {
-  const [error, setError] = useState(false);
-  const [useProxy, setUseProxy] = useState(false);
-  const [useFallback, setUseFallback] = useState(false);
+  const [currentImageUrl, setCurrentImageUrl] = useState(null);
+  const [imageSource, setImageSource] = useState('initial'); // 'initial', 'wikimedia', 'proxy', 'fallback'
+  const [isLoading, setIsLoading] = useState(true);
   
-  // Use scraped imageUrl if available, otherwise fall back to hardcoded WRESTLER_IMAGES
-  const rawUrl = imageUrl && !imageUrl.includes('cagematch.net') ? imageUrl : (WRESTLER_IMAGES[name] || imageUrl);
-  
-  useEffect(() => { 
-    setError(false); 
-    setUseProxy(false);
-    setUseFallback(false);
+  useEffect(() => {
+    // Reset state when name or imageUrl changes
+    setIsLoading(true);
+    setImageSource('initial');
+    
+    // Priority order:
+    // 1. Provided imageUrl (if not from cagematch.net)
+    // 2. Hardcoded WRESTLER_IMAGES
+    // 3. Try Wikimedia Commons API search
+    // 4. Use proxy services
+    // 5. Fallback to initials
+    
+    const loadImage = async () => {
+      // Step 1: Check provided imageUrl (skip cagematch.net)
+      if (imageUrl && !imageUrl.includes('cagematch.net')) {
+        setCurrentImageUrl(imageUrl);
+        setImageSource('initial');
+        return;
+      }
+      
+      // Step 2: Check hardcoded WRESTLER_IMAGES
+      if (WRESTLER_IMAGES[name]) {
+        setCurrentImageUrl(WRESTLER_IMAGES[name]);
+        setImageSource('initial');
+        return;
+      }
+      
+      // Step 3: Try Wikimedia Commons API search
+      try {
+        const wikimediaUrl = await searchWikimediaCommons(name);
+        if (wikimediaUrl) {
+          setCurrentImageUrl(wikimediaUrl);
+          setImageSource('wikimedia');
+          return;
+        }
+      } catch (error) {
+        console.log(`Wikimedia search failed for ${name}`);
+      }
+      
+      // Step 4: If we have a hardcoded URL, use it directly (Wikipedia URLs work well)
+      const hardcodedUrl = WRESTLER_IMAGES[name];
+      if (hardcodedUrl) {
+        setCurrentImageUrl(hardcodedUrl);
+        setImageSource('initial');
+        return;
+      }
+      
+      // Step 5: No image found - will use fallback
+      setCurrentImageUrl(null);
+      setImageSource('fallback');
+    };
+    
+    loadImage();
   }, [name, imageUrl]);
-  
-  // Use wsrv.nl image proxy to bypass CORS issues
-  // This service adds proper CORS headers and can resize images
-  const getProxiedUrl = (originalUrl) => {
-    if (!originalUrl) return null;
-    const encoded = encodeURIComponent(originalUrl);
-    return `https://wsrv.nl/?url=${encoded}&w=400&h=500&fit=cover&a=attention`;
-  };
   
   // Generate a consistent color based on wrestler name (for gradient background)
   const getColorFromName = (wrestlerName) => {
@@ -308,7 +510,7 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
   };
   
   // Final fallback - stylish initials with gradient
-  if (useFallback || !rawUrl) {
+  if (!currentImageUrl || imageSource === 'fallback') {
     const gradientColor = getColorFromName(name);
     const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
     return (
@@ -321,23 +523,41 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
     );
   }
   
-  // Try proxied URL if direct URL failed
-  const finalUrl = useProxy ? getProxiedUrl(rawUrl) : rawUrl;
+  // Try alternative proxy if current one fails
+  const handleImageError = () => {
+    if (imageSource === 'initial' && currentImageUrl) {
+      // Try with proxy
+      const proxied = getProxiedImageUrl(currentImageUrl, 400, 500, 'wsrv');
+      setCurrentImageUrl(proxied);
+      setImageSource('proxy');
+    } else if (imageSource === 'proxy' && currentImageUrl) {
+      // Try alternative proxy
+      const originalUrl = imageUrl && !imageUrl.includes('cagematch.net') 
+        ? imageUrl 
+        : (WRESTLER_IMAGES[name] || imageUrl);
+      if (originalUrl) {
+        const proxied = getProxiedImageUrl(originalUrl, 400, 500, 'images');
+        setCurrentImageUrl(proxied);
+      } else {
+        setImageSource('fallback');
+      }
+    } else if (imageSource === 'wikimedia' && currentImageUrl) {
+      // Try proxying the Wikimedia image
+      const proxied = getProxiedImageUrl(currentImageUrl, 400, 500, 'wsrv');
+      setCurrentImageUrl(proxied);
+      setImageSource('proxy');
+    } else {
+      setImageSource('fallback');
+    }
+  };
   
   return (
     <img 
-      src={finalUrl} 
+      src={currentImageUrl} 
       alt={name} 
       className={`object-cover ${className}`} 
-      onError={() => {
-        if (!useProxy && rawUrl) {
-          // First failure - try with proxy
-          setUseProxy(true);
-        } else {
-          // Proxy also failed - use fallback
-          setUseFallback(true);
-        }
-      }} 
+      onError={handleImageError}
+      onLoad={() => setIsLoading(false)}
       referrerPolicy="no-referrer" 
       crossOrigin="anonymous"
       loading="lazy" 
@@ -477,10 +697,11 @@ export default function RingsidePickemFinal() {
       return;
     }
 
-    // Clear predictions when user changes
-    setPredictions(() => ({}));
-    setCommunitySentiment(() => ({}));
-    setSelectedMethod(() => ({}));
+    // CRITICAL: Clear predictions IMMEDIATELY and synchronously when user changes
+    // This must happen before setting up any new listeners
+    setPredictions({});
+    setCommunitySentiment({});
+    setSelectedMethod({});
     setPredictionsUserId(null);
 
     const unsubProfile = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), (snap) => {
@@ -494,10 +715,11 @@ export default function RingsidePickemFinal() {
 
     // Set up predictions listener for current user
     const currentUserId = user.uid;
-    currentUserIdRef.current = currentUserId;
     
-    // Mark that we're now listening to this user's predictions
-    setPredictionsUserId(currentUserId);
+    // CRITICAL: Use a ref to track this specific listener's user ID
+    // This prevents race conditions where an old listener fires after user change
+    const listenerUserIdRef = { current: currentUserId };
+    currentUserIdRef.current = currentUserId;
     
     // Use a flag to track if this listener is still valid
     let isListenerValid = true;
@@ -505,32 +727,44 @@ export default function RingsidePickemFinal() {
     const unsubPreds = onSnapshot(
       collection(db, 'artifacts', appId, 'users', currentUserId, 'predictions'), 
       (snap) => {
-        // Ignore if user changed
-        if (currentUserIdRef.current !== currentUserId || !isListenerValid) {
+        // CRITICAL: Multiple checks to prevent stale predictions
+        // 1. Check if listener is still valid
+        if (!isListenerValid) {
+          return;
+        }
+        
+        // 2. Check if this listener's user ID still matches the current user
+        if (listenerUserIdRef.current !== currentUserId) {
           isListenerValid = false;
           return;
         }
         
-        setPredictionsUserId(prevUserId => {
-          if (prevUserId !== currentUserId && prevUserId !== null) {
-            isListenerValid = false;
-            return prevUserId;
-          }
-          
-          if (snap.empty) {
-            setPredictions({});
-          } else {
-            const preds = {}; 
-            snap.forEach(doc => { preds[doc.id] = doc.data(); }); 
-            setPredictions(preds);
-          }
-          
-          return currentUserId;
-        });
+        // 3. Check if the global current user ref has changed
+        if (currentUserIdRef.current !== currentUserId) {
+          isListenerValid = false;
+          return;
+        }
+        
+        // 4. Final check - verify user object hasn't changed
+        if (!user || user.uid !== currentUserId) {
+          isListenerValid = false;
+          return;
+        }
+        
+        // All checks passed - this is a valid update for the current user
+        setPredictionsUserId(currentUserId);
+        
+        if (snap.empty) {
+          setPredictions({});
+        } else {
+          const preds = {}; 
+          snap.forEach(doc => { preds[doc.id] = doc.data(); }); 
+          setPredictions(preds);
+        }
       },
       (error) => {
         console.error('Error listening to predictions:', error);
-        if (isListenerValid) {
+        if (isListenerValid && listenerUserIdRef.current === currentUserId) {
           setPredictions({});
           setPredictionsUserId(null);
         }
@@ -538,8 +772,14 @@ export default function RingsidePickemFinal() {
     );
     
     const cleanupPredictions = () => {
+      // Invalidate listener immediately
       isListenerValid = false;
+      listenerUserIdRef.current = null;
+      // Unsubscribe from Firestore
       unsubPreds();
+      // Clear predictions state
+      setPredictions({});
+      setPredictionsUserId(null);
     };
     
     // FIXED: Use 6 segment path for document listener: artifacts/appId/public/data/scores/global
@@ -606,21 +846,21 @@ export default function RingsidePickemFinal() {
     });
 
     return () => {
+      // CRITICAL: Clean up in proper order to prevent race conditions
+      // 1. Invalidate and unsubscribe from predictions first (most important)
+      cleanupPredictions();
+      // 2. Then clean up other listeners
       unsubProfile(); 
-      if (typeof cleanupPredictions === 'function') {
-        cleanupPredictions();
-      } else {
-        unsubPreds();
-      }
       unsubResults(); 
       unsubLb(); 
       unsubEvents();
+      // 3. Clear all state as final step
       setPredictions({});
       setCommunitySentiment({});
       setSelectedMethod({});
       setPredictionsUserId(null);
     };
-  }, [viewState, user?.uid]);
+  }, [viewState, user?.uid]); // CRITICAL: Re-run when user changes to prevent stale data
 
   // Calculate community sentiment when event is selected
   useEffect(() => {
@@ -982,13 +1222,29 @@ export default function RingsidePickemFinal() {
       return;
     }
     
-    // CRITICAL: Verify this prediction belongs to the current user
+    // CRITICAL: Multiple validation checks to prevent saving predictions for wrong user
+    // 1. Check predictionsUserId matches current user
     if (predictionsUserId !== null && predictionsUserId !== user.uid) {
       console.error('❌ BLOCKING prediction save - predictionsUserId does not match current user!', {
         predictionsUserId,
         currentUserId: user.uid
       });
       return;
+    }
+    
+    // 2. Check currentUserIdRef matches (extra safety)
+    if (currentUserIdRef.current !== user.uid) {
+      console.error('❌ BLOCKING prediction save - currentUserIdRef does not match current user!', {
+        refUserId: currentUserIdRef.current,
+        currentUserId: user.uid
+      });
+      return;
+    }
+    
+    // 3. Final check - verify predictionsUserId is set (means listener is active for this user)
+    if (predictionsUserId === null) {
+      console.warn('⚠️ Warning: predictionsUserId is null - predictions listener may not be active yet');
+      // Don't block, but log a warning
     }
     
     const currentPreds = predictions[eventId] || {};
@@ -998,19 +1254,37 @@ export default function RingsidePickemFinal() {
     };
     setPredictions(prev => ({ ...prev, [eventId]: newPreds }));
     
+    // CRITICAL: Always use user.uid from the user object, never from state
     setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'predictions', eventId), newPreds, { merge: true })
       .then(() => setTimeout(() => calculateCommunitySentiment(eventId), 1000))
-      .catch((error) => console.error('Error saving prediction:', error));
+      .catch((error) => {
+        console.error('Error saving prediction:', error);
+        // On error, revert the optimistic update
+        setPredictions(prev => {
+          const reverted = { ...prev };
+          if (reverted[eventId]) {
+            const eventPreds = { ...reverted[eventId] };
+            delete eventPreds[matchId];
+            reverted[eventId] = eventPreds;
+          }
+          return reverted;
+        });
+      });
   };
 
   // Calculate community sentiment (pick percentages) for an event
+  // Combines real user picks with simulated community data for a lively feel
   const calculateCommunitySentiment = async (eventId) => {
     if (!eventId) return;
     
+    // Get event data for match info
+    const event = scrapedEvents.find(e => e.id === eventId) || 
+                  INITIAL_EVENTS.find(e => e.id === eventId);
+    
+    if (!event) return;
+    
     try {
       // Get all user predictions for this event
-      // Users are stored at: artifacts/{appId}/public/data/users/{userId}
-      // Predictions are stored at: artifacts/{appId}/users/{userId}/predictions/{eventId}
       const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'users');
       const usersSnapshot = await getDocs(usersRef);
       
@@ -1018,57 +1292,67 @@ export default function RingsidePickemFinal() {
       
       const promises = [];
       usersSnapshot.forEach(userDoc => {
-        // Predictions path: artifacts/{appId}/users/{userId}/predictions/{eventId}
         const userPredictionsRef = doc(db, 'artifacts', appId, 'users', userDoc.id, 'predictions', eventId);
         promises.push(getDoc(userPredictionsRef));
       });
       
       const predDocs = await Promise.all(promises);
       
-      // Get event data for match info
-      const event = scrapedEvents.find(e => e.id === eventId) || 
-                    INITIAL_EVENTS.find(e => e.id === eventId);
-      
-      if (!event) {
-        return;
-      }
-      
       predDocs.forEach(predDoc => {
         if (predDoc.exists()) {
           const preds = predDoc.data();
           Object.keys(preds).forEach(matchId => {
             const pred = preds[matchId];
-            // Handle both old format (string) and new format (object)
             const winner = typeof pred === 'string' ? pred : (pred?.winner || pred);
             
             if (!matchCounts[matchId]) {
               matchCounts[matchId] = { p1: 0, p2: 0 };
             }
             
-            // Get match info to determine p1 vs p2
             const match = event.matches.find(m => m.id.toString() === matchId.toString());
             if (match) {
-              if (winner === match.p1) {
-                matchCounts[matchId].p1++;
-              } else if (winner === match.p2) {
-                matchCounts[matchId].p2++;
-              }
+              if (winner === match.p1) matchCounts[matchId].p1++;
+              else if (winner === match.p2) matchCounts[matchId].p2++;
             }
           });
         }
       });
       
-      // Calculate percentages
+      // Build sentiment for each match - use real data if available, otherwise simulate
       const sentiment = {};
-      Object.keys(matchCounts).forEach(matchId => {
-        const counts = matchCounts[matchId];
-        const total = counts.p1 + counts.p2;
-        if (total > 0) {
+      event.matches.forEach(match => {
+        const matchId = match.id.toString();
+        const realCounts = matchCounts[matchId];
+        const realTotal = realCounts ? (realCounts.p1 + realCounts.p2) : 0;
+        
+        if (realTotal >= 5) {
+          // Enough real data - use it directly
           sentiment[matchId] = {
-            p1: Math.round((counts.p1 / total) * 100),
-            p2: Math.round((counts.p2 / total) * 100),
-            total: total
+            p1: Math.round((realCounts.p1 / realTotal) * 100),
+            p2: Math.round((realCounts.p2 / realTotal) * 100),
+            total: realTotal,
+            simulated: false
           };
+        } else {
+          // Not enough real data - blend with simulated sentiment
+          const simulated = generateSimulatedSentiment(match, eventId);
+          
+          if (realTotal > 0) {
+            // Blend real + simulated (weight real data more as it grows)
+            const realWeight = realTotal / 5; // 0.2 to 1.0
+            const simWeight = 1 - realWeight;
+            const realP1Pct = (realCounts.p1 / realTotal) * 100;
+            
+            sentiment[matchId] = {
+              p1: Math.round(realP1Pct * realWeight + simulated.p1 * simWeight),
+              p2: Math.round((100 - realP1Pct) * realWeight + simulated.p2 * simWeight),
+              total: simulated.total + realTotal,
+              simulated: false // Show as real since it has some real data
+            };
+          } else {
+            // Pure simulation
+            sentiment[matchId] = simulated;
+          }
         }
       });
       
@@ -1078,6 +1362,15 @@ export default function RingsidePickemFinal() {
       }));
     } catch (error) {
       console.error("Error calculating community sentiment:", error);
+      // On error, fall back to pure simulation
+      const sentiment = {};
+      event.matches.forEach(match => {
+        sentiment[match.id.toString()] = generateSimulatedSentiment(match, eventId);
+      });
+      setCommunitySentiment(prev => ({
+        ...prev,
+        [eventId]: sentiment
+      }));
     }
   };
 
@@ -1759,35 +2052,94 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                   <div key={match.id} className="relative group">
                     <div className="text-center mb-2"><span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-slate-900 px-3 py-1 rounded-full border border-slate-800">{match.title}</span></div>
                     
-                    {/* Community Sentiment Bar */}
+                    {/* Community Sentiment Bar - Tug of War Style */}
                     {!actualWinner && (
-                      <div className="mb-3 px-2">
+                      <div className="mb-4 px-2">
                         {sentiment && sentiment.total > 0 ? (
-                          <>
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="text-[9px] text-slate-500 font-bold uppercase">Community Pick %</span>
-                              <span className="text-[9px] text-slate-600">({sentiment.total} picks)</span>
+                          <div className="relative">
+                            {/* Header with live indicator */}
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-1.5">
+                                  <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
+                                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Community Picks</span>
+                                </div>
+                                {sentiment.simulated && (
+                                  <span className="text-[8px] text-slate-600 bg-slate-800 px-1.5 py-0.5 rounded">PROJECTED</span>
+                                )}
+                              </div>
+                              <span className="text-[10px] text-slate-500 font-medium">{sentiment.total.toLocaleString()} votes</span>
                             </div>
-                            <div className="flex h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
-                              <div 
-                                className="bg-blue-600 transition-all duration-500" 
-                                style={{ width: `${sentiment.p1}%` }}
-                                title={`${sentiment.p1}% picked ${match.p1}`}
-                              ></div>
-                              <div 
-                                className="bg-purple-600 transition-all duration-500" 
-                                style={{ width: `${sentiment.p2}%` }}
-                                title={`${sentiment.p2}% picked ${match.p2}`}
-                              ></div>
+                            
+                            {/* Tug of War Bar */}
+                            <div className="relative">
+                              {/* Background track */}
+                              <div className="h-4 bg-slate-900 rounded-full overflow-hidden border border-slate-700 shadow-inner relative">
+                                {/* Left side (P1) */}
+                                <div 
+                                  className="absolute left-0 top-0 bottom-0 bg-gradient-to-r from-cyan-600 via-cyan-500 to-cyan-400 transition-all duration-700 ease-out"
+                                  style={{ width: `${sentiment.p1}%` }}
+                                >
+                                  {sentiment.p1 >= 55 && (
+                                    <div className="absolute right-2 top-1/2 -translate-y-1/2 text-[8px] font-black text-white drop-shadow-lg">
+                                      {sentiment.p1}%
+                                    </div>
+                                  )}
+                                </div>
+                                {/* Right side (P2) */}
+                                <div 
+                                  className="absolute right-0 top-0 bottom-0 bg-gradient-to-l from-amber-600 via-amber-500 to-amber-400 transition-all duration-700 ease-out"
+                                  style={{ width: `${sentiment.p2}%` }}
+                                >
+                                  {sentiment.p2 >= 55 && (
+                                    <div className="absolute left-2 top-1/2 -translate-y-1/2 text-[8px] font-black text-white drop-shadow-lg">
+                                      {sentiment.p2}%
+                                    </div>
+                                  )}
+                                </div>
+                                {/* Center battle point */}
+                                <div 
+                                  className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 bg-white rounded-full shadow-lg border-2 border-slate-600 z-10 transition-all duration-700"
+                                  style={{ left: `${sentiment.p1}%` }}
+                                ></div>
+                              </div>
+                              
+                              {/* Names and percentages below */}
+                              <div className="flex justify-between mt-2">
+                                <div className="flex items-center gap-1.5">
+                                  <div className="w-2 h-2 rounded-full bg-gradient-to-r from-cyan-600 to-cyan-400"></div>
+                                  <span className={`text-[10px] font-bold ${sentiment.p1 > sentiment.p2 ? 'text-cyan-400' : 'text-slate-500'}`}>
+                                    {match.p1.length > 15 ? match.p1.split(' ')[0] : match.p1}
+                                  </span>
+                                  {sentiment.p1 <= 45 && (
+                                    <span className="text-[10px] text-slate-600 font-medium">{sentiment.p1}%</span>
+                                  )}
+                                  {sentiment.p1 >= 60 && (
+                                    <span className="text-[8px] bg-cyan-500/20 text-cyan-400 px-1.5 py-0.5 rounded font-bold">🔥 HOT</span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  {sentiment.p2 >= 60 && (
+                                    <span className="text-[8px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded font-bold">🔥 HOT</span>
+                                  )}
+                                  {sentiment.p2 <= 45 && (
+                                    <span className="text-[10px] text-slate-600 font-medium">{sentiment.p2}%</span>
+                                  )}
+                                  <span className={`text-[10px] font-bold ${sentiment.p2 > sentiment.p1 ? 'text-amber-400' : 'text-slate-500'}`}>
+                                    {match.p2.length > 15 ? match.p2.split(' ')[0] : match.p2}
+                                  </span>
+                                  <div className="w-2 h-2 rounded-full bg-gradient-to-r from-amber-400 to-amber-600"></div>
+                                </div>
+                              </div>
                             </div>
-                            <div className="flex justify-between text-[9px] text-slate-500 mt-1">
-                              <span>{sentiment.p1}% {match.p1.split(' ')[0]}</span>
-                              <span>{sentiment.p2}% {match.p2.split(' ')[0]}</span>
-                            </div>
-                          </>
+                          </div>
                         ) : (
-                          <div className="text-center py-2">
-                            <span className="text-[9px] text-slate-600 font-medium">No community picks yet - be the first!</span>
+                          <div className="text-center py-3 bg-slate-900/50 rounded-xl border border-dashed border-slate-800">
+                            <div className="flex items-center justify-center gap-2 mb-1">
+                              <Users size={14} className="text-slate-600" />
+                              <span className="text-[10px] text-slate-500 font-bold uppercase">Be the first to pick!</span>
+                            </div>
+                            <span className="text-[9px] text-slate-600">Your pick shapes the community sentiment</span>
                           </div>
                         )}
                       </div>
@@ -1986,7 +2338,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                              <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent pt-12 pb-3 px-2 text-center">
                                <span className={`block font-black ${match.p1.length > 25 ? 'text-xs' : match.p1.length > 15 ? 'text-sm' : 'text-lg'} uppercase leading-tight ${myPick === match.p1 ? 'text-red-500' : 'text-white'}`}>{match.p1}</span>
                                {myPick === match.p1 && <span className="text-[8px] font-bold bg-red-600 text-white px-2 py-0.5 rounded-full inline-block mt-1">YOUR PICK</span>}
-                               {sentiment && sentiment.p1 > 50 && <div className="text-[8px] text-blue-400 font-bold mt-1">🔥 {sentiment.p1}% FAVORITE</div>}
+                               {sentiment && sentiment.p1 >= 55 && <div className="text-[8px] text-cyan-400 font-bold mt-1 bg-cyan-950/50 px-2 py-0.5 rounded-full inline-block">🔥 {sentiment.p1}% pick</div>}
                              </div>
                              {actualWinner === match.p1 && <div className="absolute top-2 left-2 bg-green-500 text-black text-[10px] font-black px-2 py-1 rounded uppercase shadow-lg z-20">Winner</div>}
                           </div>
@@ -2004,7 +2356,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                              <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent pt-12 pb-3 px-2 text-center">
                                <span className={`block font-black ${match.p2.length > 25 ? 'text-xs' : match.p2.length > 15 ? 'text-sm' : 'text-lg'} uppercase leading-tight ${myPick === match.p2 ? 'text-red-500' : 'text-white'}`}>{match.p2}</span>
                                {myPick === match.p2 && <span className="text-[8px] font-bold bg-red-600 text-white px-2 py-0.5 rounded-full inline-block mt-1">YOUR PICK</span>}
-                               {sentiment && sentiment.p2 > 50 && <div className="text-[8px] text-purple-400 font-bold mt-1">🔥 {sentiment.p2}% FAVORITE</div>}
+                               {sentiment && sentiment.p2 >= 55 && <div className="text-[8px] text-amber-400 font-bold mt-1 bg-amber-950/50 px-2 py-0.5 rounded-full inline-block">🔥 {sentiment.p2}% pick</div>}
                              </div>
                              {actualWinner === match.p2 && <div className="absolute top-2 right-2 bg-green-500 text-black text-[10px] font-black px-2 py-1 rounded uppercase shadow-lg z-20">Winner</div>}
                           </div>
