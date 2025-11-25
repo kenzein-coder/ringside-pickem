@@ -858,6 +858,37 @@ const KNOWN_EVENT_POSTERS = {
   // Example: 'wwe-wrestlemania-40': 'https://upload.wikimedia.org/...'
 };
 
+// Helper function to determine if an event is a weekly show (used for PPV detection)
+const isWeeklyShowCheck = (eventName) => {
+  // First check for known PPV names that might match weekly patterns
+  const ppvExceptions = [
+    /saturday\s*night'?s\s*main\s*event/i, // This is a PPV, not weekly
+    /world\s*tag\s*league\s*finals/i, // NJPW PPV
+  ];
+  if (ppvExceptions.some(pattern => pattern.test(eventName))) {
+    return false; // It's a PPV, not a weekly show
+  }
+  
+  const weeklyPatterns = [
+    /dynamite/i,
+    /collision/i,
+    /rampage/i,
+    /raw/i,
+    /smackdown/i,
+    /nxt(?!\s*(takeover|stand|deliver|deadline|vengeance|battleground))/i,
+    /superstars/i,
+    /thunder/i,
+    /nitro/i,
+    /impact(?!\s*(slammiversary|bound|hard|sacrifice|rebellion|against|genesis))/i,
+    /dark(?:\s|$)/i,
+    /elevation/i,
+    /strong/i,
+    /road\s*to/i,
+  ];
+  
+  return weeklyPatterns.some(pattern => pattern.test(eventName));
+};
+
 // Helper function to get event poster/banner with fallback
 const getEventImage = async (event) => {
   if (!event) return null;
@@ -886,7 +917,40 @@ const getEventImage = async (event) => {
     return foundUrl;
   }
   
-  // Fallback to placeholder
+  // For PPVs without a poster, fall back to promotion logo/banner
+  const isWeekly = isWeeklyShowCheck(event.name);
+  const isPPV = !isWeekly || event.isPPV === true;
+  
+  if (isPPV && (event.promotionId || event.promoId)) {
+    // Try to get promotion logo as fallback
+    const promotionId = event.promotionId || 
+      (event.promoId === 'wwe' ? '1' :
+       event.promoId === 'aew' ? '2287' :
+       event.promoId === 'njpw' ? '7' :
+       event.promoId === 'tna' ? '5' :
+       event.promoId === 'roh' ? '122' : null);
+    
+    const promotionName = event.promotionName || 
+      (event.promoId === 'wwe' ? 'WWE' :
+       event.promoId === 'aew' ? 'AEW' :
+       event.promoId === 'njpw' ? 'NJPW' :
+       event.promoId === 'tna' ? 'TNA' :
+       event.promoId === 'roh' ? 'ROH' : null);
+    
+    if (promotionId && promotionName) {
+      try {
+        const promotionLogo = await searchPromotionLogo(promotionId, promotionName);
+        if (promotionLogo) {
+          // Use promotion logo as fallback for PPV
+          return promotionLogo;
+        }
+      } catch (error) {
+        console.log(`Failed to load promotion logo for ${event.name}:`, error);
+      }
+    }
+  }
+  
+  // Final fallback to placeholder
   return `https://picsum.photos/seed/${event.id}/800/400`;
 };
 
@@ -2646,8 +2710,49 @@ export default function RingsidePickemFinal() {
     
     const eventsToUse = mergeEvents();
     
+    // Filter out "Saturday Night's Main Event" and remove duplicates
+    const filteredEvents = eventsToUse
+      .filter(ev => !/saturday\s*night'?s\s*main\s*event/i.test(ev.name))
+      .filter((ev, index, self) => {
+        // Remove duplicates by checking ID, normalized name, and date
+        const normalizedName = ev.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const evDate = ev.date;
+        
+        return index === self.findIndex(e => {
+          // Exact ID match = duplicate
+          if (e.id === ev.id) return true;
+          
+          // Same date and very similar names = likely duplicate
+          const otherNormalized = e.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (e.date === evDate && evDate) {
+            // Check if one name contains the other (e.g., "Survivor Series" vs "Survivor Series: WarGames 2025")
+            const shorter = normalizedName.length < otherNormalized.length ? normalizedName : otherNormalized;
+            const longer = normalizedName.length >= otherNormalized.length ? normalizedName : otherNormalized;
+            
+            // If shorter name is at least 8 chars and is contained in longer, and they're on same date, likely duplicate
+            if (shorter.length >= 8 && longer.includes(shorter)) {
+              return true;
+            }
+            
+            // If normalized names are very similar (differ by <= 10 chars), likely duplicate
+            if (Math.abs(normalizedName.length - otherNormalized.length) <= 10) {
+              // Check if they share a significant portion
+              const minLen = Math.min(normalizedName.length, otherNormalized.length);
+              if (minLen >= 10) {
+                const sharedPrefix = normalizedName.substring(0, Math.min(10, minLen));
+                if (otherNormalized.startsWith(sharedPrefix)) {
+                  return true;
+                }
+              }
+            }
+          }
+          
+          return false;
+        });
+      });
+    
     // First filter by subscriptions
-    const subscribedEvents = eventsToUse.filter(ev => {
+    const subscribedEvents = filteredEvents.filter(ev => {
       // Match by promoId (wwe, aew, etc.) or by promotionId (1, 2287, etc.)
       return subs.includes(ev.promoId) || 
              (ev.promotionId && subs.some(sub => {
@@ -2686,7 +2791,7 @@ export default function RingsidePickemFinal() {
     const oneMonthFromToday = new Date(today);
     oneMonthFromToday.setMonth(oneMonthFromToday.getMonth() + 1);
     
-    const filteredEvents = subscribedEvents.filter(ev => {
+    const typeFilteredEvents = subscribedEvents.filter(ev => {
       const isWeekly = isWeeklyShow(ev.name);
       const eventDate = parseDate(ev.date);
       // Event is past if its date is before today (not including today)
@@ -2708,7 +2813,7 @@ export default function RingsidePickemFinal() {
     // Sort by date
     // For past events: most recent first (descending)
     // For upcoming events: soonest first (ascending)
-    return filteredEvents.sort((a, b) => {
+    return typeFilteredEvents.sort((a, b) => {
       const dateA = parseDate(a.date);
       const dateB = parseDate(b.date);
       return eventTypeFilter === 'past' ? dateB - dateA : dateA - dateB;
