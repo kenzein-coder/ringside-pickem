@@ -571,10 +571,10 @@ async function scrapeEventDetails(event) {
     const eventDetails = {
       ...event,
       date: details.date || event.date,
-      venue: details.venue || details.location || details.arena,
-      location: details.location,
-      arena: details.arena,
-      matches: details.matches
+      venue: details.venue || details.location || details.arena || event.venue,
+      location: details.location || event.location,
+      arena: details.arena || event.arena,
+      matches: details.matches?.length > 0 ? details.matches : (event.matches || [])
     };
     
     console.log(`✅ Found ${details.matches.length} matches, venue: ${eventDetails.venue || 'N/A'}`);
@@ -645,14 +645,36 @@ async function main() {
       // Save to Firestore if available
       if (db) {
         try {
+          // Build the document data, filtering out undefined values
+          // Compute promoId from promotionId if not set
+          const promoIdMap = { '1': 'wwe', '2287': 'aew', '7': 'njpw', '5': 'tna', '122': 'roh' };
+          const computedPromoId = eventDetails.promoId || promoIdMap[eventDetails.promotionId] || null;
+          
+          const docData = {
+            id: eventDetails.id,
+            name: eventDetails.name,
+            date: eventDetails.date,
+            venue: eventDetails.venue || null,
+            promotionId: eventDetails.promotionId || null,
+            promotionName: eventDetails.promotionName || null,
+            promoId: computedPromoId,
+            matches: eventDetails.matches || [],
+            isPPV: event.isPPV || isPPVEvent(event.name),
+            updatedAt: new Date().toISOString(),
+            scrapedAt: new Date().toISOString()
+          };
+          
+          // Only add optional fields if they have values
+          if (eventDetails.location) docData.location = eventDetails.location;
+          if (eventDetails.arena) docData.arena = eventDetails.arena;
+          if (eventDetails.cagematchEventId) docData.cagematchEventId = eventDetails.cagematchEventId;
+          if (eventDetails.bannerUrl) docData.bannerUrl = eventDetails.bannerUrl;
+          if (eventDetails.posterUrl) docData.posterUrl = eventDetails.posterUrl;
+          if (eventDetails.slug) docData.slug = eventDetails.slug;
+          
           await setDoc(
             doc(db, 'artifacts', appId, 'public', 'data', 'events', eventDetails.id),
-            {
-              ...eventDetails,
-              isPPV: event.isPPV || isPPVEvent(event.name),
-              updatedAt: new Date().toISOString(),
-              scrapedAt: new Date().toISOString()
-            },
+            docData,
             { merge: true }
           );
           console.log(`  ✅ Saved ${eventDetails.name} to Firestore`);
