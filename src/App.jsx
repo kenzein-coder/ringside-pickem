@@ -63,14 +63,35 @@ const firebaseConfig = {
     appId: import.meta.env.VITE_FIREBASE_APP_ID
   };
 
-// Validate Firebase config
-if (!firebaseConfig.apiKey || firebaseConfig.apiKey.includes('...') || firebaseConfig.apiKey.length < 20) {
-  console.error('❌ Invalid Firebase API Key. Please check your .env file.');
-}
+// Debug: Log Firebase config (without exposing full keys)
+console.log('🔧 Firebase Config Check:', {
+  apiKey: firebaseConfig.apiKey ? `${firebaseConfig.apiKey.substring(0, 10)}...` : 'MISSING',
+  authDomain: firebaseConfig.authDomain || 'MISSING',
+  projectId: firebaseConfig.projectId || 'MISSING',
+});
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+// Validate Firebase config
+let firebaseError = null;
+let app, auth, db;
+
+try {
+  if (!firebaseConfig.apiKey) {
+    throw new Error('Firebase API Key is missing. Make sure VITE_FIREBASE_API_KEY is set in your .env file.');
+  }
+  if (firebaseConfig.apiKey.includes('...') || firebaseConfig.apiKey.includes('your_')) {
+    throw new Error('Firebase API Key appears to be a placeholder. Please replace with your actual API key.');
+  }
+  if (firebaseConfig.apiKey.length < 20) {
+    throw new Error('Firebase API Key is too short. Please check your .env file.');
+  }
+  app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  db = getFirestore(app);
+  console.log('✅ Firebase initialized successfully');
+} catch (error) {
+  console.error('❌ Firebase initialization error:', error);
+  firebaseError = error.message;
+}
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 const googleProvider = new GoogleAuthProvider();
 // Configure Google provider to always show account selection
@@ -108,25 +129,28 @@ const WRESTLER_IMAGES = {
   'Billie Starkz': 'https://upload.wikimedia.org/wikipedia/commons/3/3e/Billie_Starkz.jpg'
 };
 
+// Using picsum.photos for reliable placeholder images (no CORS issues)
 const EVENT_BACKGROUNDS = {
-  'wwe-survivor-2025': 'https://images.unsplash.com/photo-1514525253440-b393452e3383?q=80&w=800&auto=format&fit=crop',
-  'aew-worlds-end-2025': 'https://images.unsplash.com/photo-1574602321946-e27ef6933432?q=80&w=800&auto=format&fit=crop', 
-  'njpw-wk20': 'https://images.unsplash.com/photo-1533577116850-9cc66cad8a9b?q=80&w=800&auto=format&fit=crop', 
-  'tna-hardto-2026': 'https://images.unsplash.com/photo-1511250503134-894f5c67634a?q=80&w=800&auto=format&fit=crop',
-  'roh-final-battle-2025': 'https://images.unsplash.com/photo-1599582319422-d7b77ce17332?q=80&w=800&auto=format&fit=crop'
+  'wwe-survivor-2025': 'https://picsum.photos/seed/wwe-survivor/800/400',
+  'aew-worlds-end-2025': 'https://picsum.photos/seed/aew-worlds/800/400', 
+  'njpw-wk20': 'https://picsum.photos/seed/njpw-wk20/800/400', 
+  'tna-hardto-2026': 'https://picsum.photos/seed/tna-hard/800/400',
+  'roh-final-battle-2025': 'https://picsum.photos/seed/roh-final/800/400',
+  'default': 'https://picsum.photos/seed/wrestling/800/400'
 };
 
+// Logo URLs - using null to trigger text fallback (more reliable than broken images)
 const LOGO_URLS = {
-  wwe: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e3/WWE_Logo_2014.png/600px-WWE_Logo_2014.png',
-  aew: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/52/All_Elite_Wrestling_logo.svg/600px-All_Elite_Wrestling_logo.svg.png',
-  njpw: 'https://upload.wikimedia.org/wikipedia/en/thumb/7/7e/NJPW_Lion_Mark.svg/600px-NJPW_Lion_Mark.svg.png',
-  tna: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/30/TNA_Wrestling_2024_Logo.png/600px-TNA_Wrestling_2024_Logo.png',
-  roh: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e6/Ring_of_Honor_2022_logo.svg/600px-Ring_of_Honor_2022_logo.svg.png',
-  stardom: 'https://upload.wikimedia.org/wikipedia/commons/e/ee/World_Wonder_Ring_Stardom_logo.png',
-  cmll: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c2/Consejo_Mundial_de_Lucha_Libre_logo.svg/600px-Consejo_Mundial_de_Lucha_Libre_logo.svg.png',
-  aaa: 'https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/Lucha_Libre_AAA_Worldwide_logo.svg/600px-Lucha_Libre_AAA_Worldwide_logo.svg.png',
-  gcw: 'https://upload.wikimedia.org/wikipedia/commons/0/05/GCW_Logo_2022.png',
-  mlw: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/87/Major_League_Wrestling_logo.svg/600px-Major_League_Wrestling_logo.svg.png'
+  wwe: null,
+  aew: null,
+  njpw: null,
+  tna: null,
+  roh: null,
+  stardom: null,
+  cmll: null,
+  aaa: null,
+  gcw: null,
+  mlw: null
 };
 
 const PROMOTIONS = [
@@ -186,13 +210,27 @@ const INITIAL_EVENTS = [
 // --- HELPER COMPONENTS ---
 
 const BrandLogo = ({ id, className = "w-full h-full object-contain", logoUrl }) => {
-  const [error, setError] = useState(false);
-  // Prioritize hardcoded LOGO_URLS over scraped logoUrl (Cagematch.net may have CORS issues)
-  // Only use scraped logoUrl if it's not from Cagematch.net
-  const url = (logoUrl && !logoUrl.includes('cagematch.net')) ? logoUrl : (LOGO_URLS[id] || logoUrl);
-  useEffect(() => { setError(false); }, [id, logoUrl]);
-  if (error || !url) return <div className={`w-full h-full flex items-center justify-center bg-slate-800 text-slate-400 font-black text-[10px] uppercase border border-slate-700 rounded tracking-tighter`}>{id.substring(0, 4)}</div>;
-  return <img src={url} alt={id} className={className} onError={() => setError(true)} referrerPolicy="no-referrer" loading="lazy" />;
+  // Brand colors for each promotion
+  const brandColors = {
+    wwe: { bg: 'bg-gradient-to-br from-red-600 to-red-800', text: 'text-white' },
+    aew: { bg: 'bg-gradient-to-br from-yellow-500 to-amber-600', text: 'text-black' },
+    njpw: { bg: 'bg-gradient-to-br from-red-700 to-red-900', text: 'text-white' },
+    tna: { bg: 'bg-gradient-to-br from-green-500 to-green-700', text: 'text-white' },
+    roh: { bg: 'bg-gradient-to-br from-red-600 to-black', text: 'text-white' },
+    stardom: { bg: 'bg-gradient-to-br from-pink-500 to-pink-700', text: 'text-white' },
+    cmll: { bg: 'bg-gradient-to-br from-blue-600 to-blue-800', text: 'text-yellow-400' },
+    aaa: { bg: 'bg-gradient-to-br from-red-600 to-orange-600', text: 'text-white' },
+    gcw: { bg: 'bg-gradient-to-br from-stone-700 to-stone-900', text: 'text-white' },
+    mlw: { bg: 'bg-gradient-to-br from-slate-700 to-slate-900', text: 'text-yellow-400' },
+  };
+  
+  const colors = brandColors[id] || { bg: 'bg-gradient-to-br from-slate-700 to-slate-900', text: 'text-white' };
+  
+  return (
+    <div className={`w-full h-full flex items-center justify-center ${colors.bg} ${colors.text} font-black text-xs uppercase rounded tracking-tight shadow-inner`}>
+      {id.toUpperCase()}
+    </div>
+  );
 };
 
 const WrestlerImage = ({ name, className, imageUrl }) => {
@@ -201,12 +239,33 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
   // Note: Cagematch.net images may have CORS issues, so we prioritize hardcoded images
   const url = imageUrl && !imageUrl.includes('cagematch.net') ? imageUrl : (WRESTLER_IMAGES[name] || imageUrl);
   useEffect(() => { setError(false); }, [name, imageUrl]);
+  
+  // Generate a consistent color based on wrestler name
+  const getColorFromName = (name) => {
+    const colors = [
+      'from-red-900 to-red-950',
+      'from-blue-900 to-blue-950', 
+      'from-purple-900 to-purple-950',
+      'from-green-900 to-green-950',
+      'from-amber-900 to-amber-950',
+      'from-cyan-900 to-cyan-950',
+      'from-pink-900 to-pink-950',
+      'from-indigo-900 to-indigo-950',
+    ];
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+      hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return colors[Math.abs(hash) % colors.length];
+  };
+  
   if (error || !url) {
     const initials = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+    const gradientColor = getColorFromName(name);
     return (
-      <div className={`bg-slate-800 flex items-center justify-center ${className} relative overflow-hidden`}>
-        <User className="text-slate-700 w-1/2 h-1/2 absolute opacity-50" />
-        <span className="relative z-10 font-black text-4xl text-slate-600">{initials}</span>
+      <div className={`bg-gradient-to-br ${gradientColor} flex items-center justify-center ${className} relative overflow-hidden`}>
+        <User className="text-white/20 w-1/2 h-1/2 absolute opacity-50" />
+        <span className="relative z-10 font-black text-4xl text-white/80 drop-shadow-lg">{initials}</span>
       </div>
     );
   }
@@ -270,6 +329,12 @@ export default function RingsidePickemFinal() {
 
   // --- AUTH & INIT ---
   useEffect(() => {
+    // Skip auth listener if Firebase failed to initialize
+    if (!auth) {
+      setAuthLoading(false);
+      return;
+    }
+    
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       console.log('🔐 Auth state changed. New user:', currentUser?.uid || 'null');
       
@@ -1069,6 +1134,33 @@ export default function RingsidePickemFinal() {
     });
   }, [userProfile, scrapedEvents]);
 
+  // --- VIEW: FIREBASE ERROR ---
+  if (firebaseError) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
+        <div className="bg-red-900/20 border border-red-900 rounded-xl p-6 max-w-md">
+          <h1 className="text-xl font-bold text-red-500 mb-4 text-center">Firebase Configuration Error</h1>
+          <p className="text-slate-300 text-sm mb-4 bg-slate-900 p-3 rounded font-mono">{firebaseError}</p>
+          <div className="text-slate-400 text-xs space-y-2">
+            <p className="font-bold text-slate-300">To fix this:</p>
+            <ol className="list-decimal list-inside space-y-1">
+              <li>Create a <code className="bg-slate-800 px-1 rounded">.env</code> file in your project root</li>
+              <li>Add your Firebase credentials:</li>
+            </ol>
+            <pre className="bg-slate-900 p-3 rounded text-[10px] overflow-x-auto mt-2">
+{`VITE_FIREBASE_API_KEY=AIza...
+VITE_FIREBASE_AUTH_DOMAIN=your-app.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=your-app
+VITE_FIREBASE_STORAGE_BUCKET=your-app.appspot.com
+VITE_FIREBASE_MESSAGING_SENDER_ID=123456789
+VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
+            <p className="mt-3">After creating/updating the .env file, restart the dev server.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // --- VIEW: LOADING ---
   if (authLoading || viewState === 'loading') {
     return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Activity className="animate-spin text-red-600" /></div>;
@@ -1427,11 +1519,11 @@ export default function RingsidePickemFinal() {
               myEvents.map(event => {
                 const promo = PROMOTIONS.find(p => p.id === event.promoId);
                 // Use scraped bannerUrl/posterUrl if available, otherwise fall back to hardcoded EVENT_BACKGROUNDS
-                const bgImage = event.bannerUrl || event.posterUrl || EVENT_BACKGROUNDS[event.id] || EVENT_BACKGROUNDS['wwe-survivor-2025'];
+                const bgImage = event.bannerUrl || event.posterUrl || EVENT_BACKGROUNDS[event.id] || EVENT_BACKGROUNDS['default'];
                 const isGraded = eventResults[event.id];
                 return (
                   <div key={event.id} onClick={() => { setSelectedEvent(event); setActiveTab('event'); }} className="group relative bg-slate-900 hover:bg-slate-800 border border-slate-800 transition-all cursor-pointer rounded-2xl overflow-hidden shadow-xl" style={{ height: '200px' }}>
-                    <div className="absolute inset-0"><img src={bgImage} alt="poster" className="w-full h-full object-cover opacity-60 group-hover:opacity-40 transition-opacity duration-500 group-hover:scale-105" referrerPolicy="no-referrer" onError={(e) => { e.target.src = EVENT_BACKGROUNDS['wwe-survivor-2025']; }} /><div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/80 to-transparent"></div></div>
+                    <div className="absolute inset-0"><img src={bgImage} alt="poster" className="w-full h-full object-cover opacity-60 group-hover:opacity-40 transition-opacity duration-500 group-hover:scale-105" referrerPolicy="no-referrer" onError={(e) => { e.target.style.display = 'none'; }} /><div className="absolute inset-0 bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950"></div></div>
                     <div className="absolute inset-0 p-5 flex flex-col justify-end">
                       <div className="flex justify-between items-end">
                         <div className="flex-1">
@@ -1498,7 +1590,8 @@ export default function RingsidePickemFinal() {
           <div className="pb-24 animate-slideUp">
             <button onClick={() => setActiveTab('home')} className="mb-4 text-slate-500 hover:text-white flex items-center gap-1 text-xs font-bold uppercase tracking-wider">← Feed</button>
             <div className="mb-6 relative h-48 rounded-2xl overflow-hidden shadow-2xl border border-slate-800">
-              <img src={selectedEvent.bannerUrl || selectedEvent.posterUrl || EVENT_BACKGROUNDS[selectedEvent.id] || EVENT_BACKGROUNDS['wwe-survivor-2025']} className="w-full h-full object-cover opacity-50" referrerPolicy="no-referrer" onError={(e) => { e.target.src = EVENT_BACKGROUNDS['wwe-survivor-2025']; }} />
+              <img src={selectedEvent.bannerUrl || selectedEvent.posterUrl || EVENT_BACKGROUNDS[selectedEvent.id] || EVENT_BACKGROUNDS['default']} className="w-full h-full object-cover opacity-50" referrerPolicy="no-referrer" onError={(e) => { e.target.style.display = 'none'; }} />
+              <div className="absolute inset-0 bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950 -z-10"></div>
               <div className="absolute inset-0 bg-gradient-to-t from-slate-950 to-transparent"></div>
               <div className="absolute bottom-0 left-0 p-6 w-full text-center"><div className="inline-block w-16 h-16 p-2 bg-slate-950/50 backdrop-blur-md rounded-xl border border-slate-700 mb-2 shadow-lg"><BrandLogo id={selectedEvent.promoId} /></div><h1 className="text-3xl font-black italic uppercase text-white shadow-black drop-shadow-lg">{selectedEvent.name}</h1></div>
             </div>
