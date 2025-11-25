@@ -202,7 +202,7 @@ async function resetAllAccounts() {
       console.log('⚠️  Could not reset scores (may not exist)\n');
     }
 
-    // 5. Reset images cache (optional - uncomment if you want to reset cached images too)
+    // 5. Reset images cache
     console.log('🔄 Resetting images cache...');
     const imagesRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('images');
     try {

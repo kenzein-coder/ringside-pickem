@@ -51,7 +51,8 @@ import {
   LogOut,
   Shield,
   Loader2,
-  Tv
+  Tv,
+  Clock
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -1512,7 +1513,9 @@ export default function RingsidePickemFinal() {
   // Data State
   const [leaderboardScope, setLeaderboardScope] = useState('global');
   const [leaderboard, setLeaderboard] = useState([]);
-  const [predictions, setPredictions] = useState({});
+  // CRITICAL: Store predictions keyed by user ID to prevent cross-contamination
+  // Structure: { [userId]: { [eventId]: { [matchId]: prediction } } }
+  const [predictionsByUser, setPredictionsByUser] = useState({});
   const [eventResults, setEventResults] = useState({});
   const [isConnected, setIsConnected] = useState(false);
   const [userId, setUserId] = useState(null);
@@ -1520,7 +1523,7 @@ export default function RingsidePickemFinal() {
   const [communitySentiment, setCommunitySentiment] = useState({}); // { eventId: { matchId: { p1: 65, p2: 35 } } }
   const [selectedMethod, setSelectedMethod] = useState({}); // { eventId-matchId: 'pinfall' }
   const [predictionsUserId, setPredictionsUserId] = useState(null); // Track which user's predictions we're showing
-  const [eventTypeFilter, setEventTypeFilter] = useState('ppv'); // 'ppv' or 'weekly'
+  const [eventTypeFilter, setEventTypeFilter] = useState('ppv'); // 'ppv', 'weekly', or 'past'
   
   // Use ref to track current user ID - this won't cause re-renders and is always current
   const currentUserIdRef = useRef(null);
@@ -1528,14 +1531,70 @@ export default function RingsidePickemFinal() {
   // Track previous user ID to detect changes
   const previousUserIdRef = useRef(null);
   
-  // Clear ALL user data when user ID changes
+  // Helper to get current user's predictions
+  // CRITICAL: Use currentUserIdRef to ensure we always get the correct user's predictions
+  // This prevents stale user state from causing cross-contamination
+  const getCurrentUserPredictions = () => {
+    const currentUserId = currentUserIdRef.current || user?.uid;
+    if (!currentUserId) return {};
+    return predictionsByUser[currentUserId] || {};
+  };
+  
+  // Helper to set current user's predictions
+  // CRITICAL: Use currentUserIdRef to ensure we always set for the correct user
+  // This prevents stale user state from causing cross-contamination
+  const setCurrentUserPredictions = (newPredictions) => {
+    const currentUserId = currentUserIdRef.current || user?.uid;
+    if (!currentUserId) {
+      console.error('🔒 Cannot set predictions - no current user ID');
+      return;
+    }
+    setPredictionsByUser(prev => {
+      // Final safety check - verify the user ID matches
+      if (currentUserIdRef.current !== currentUserId) {
+        console.error('🔒 CRITICAL: User ID mismatch in setCurrentUserPredictions!', {
+          refUserId: currentUserIdRef.current,
+          expectedUserId: currentUserId
+        });
+        return prev; // Don't update if user changed
+      }
+      return {
+        ...prev,
+        [currentUserId]: newPredictions
+      };
+    });
+  };
+  
+  // Clear ALL user data when user ID changes - MUST happen first
   useEffect(() => {
     if (user?.uid !== previousUserIdRef.current) {
-      setPredictions({});
+      const previousUserId = previousUserIdRef.current;
+      const newUserId = user?.uid;
+      
+      console.log('🔄 USER CHANGED: Clearing ALL predictions state', {
+        previousUserId,
+        newUserId,
+        timestamp: new Date().toISOString()
+      });
+      
+      // CRITICAL: Clear ALL predictionsByUser when user changes to prevent cross-contamination
+      // This ensures no data from the previous user can leak to the new user
+      setPredictionsByUser(prev => {
+        if (Object.keys(prev).length > 0) {
+          console.log('🧹 Clearing predictionsByUser on user change:', {
+            previousUserId,
+            newUserId,
+            clearedUserKeys: Object.keys(prev)
+          });
+        }
+        return {}; // Complete reset
+      });
+      
       setCommunitySentiment({});
       setSelectedMethod({});
       setPredictionsUserId(null);
-      previousUserIdRef.current = user?.uid || null;
+      currentUserIdRef.current = null; // Also clear the ref
+      previousUserIdRef.current = newUserId || null;
     }
   }, [user?.uid]);
 
@@ -1549,8 +1608,14 @@ export default function RingsidePickemFinal() {
     
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       // Clear all user data when auth state changes
+      console.log('🔄 AUTH STATE CHANGED:', {
+        previousUserId: currentUserIdRef.current,
+        newUserId: currentUser?.uid,
+        timestamp: new Date().toISOString()
+      });
       currentUserIdRef.current = null;
-      setPredictions({});
+      // CRITICAL: Clear predictionsByUser on auth change to prevent cross-contamination
+      setPredictionsByUser({});
       setUserProfile(null);
       setCommunitySentiment({});
       setSelectedMethod({});
@@ -1594,19 +1659,19 @@ export default function RingsidePickemFinal() {
   useEffect(() => {
     if (viewState !== 'dashboard' || !user || !user.uid) {
       // Clear predictions when not in dashboard or no user
-      setPredictions({});
       setCommunitySentiment({});
       setSelectedMethod({});
       setPredictionsUserId(null);
       return;
     }
 
-    // CRITICAL: Clear predictions IMMEDIATELY and synchronously when user changes
-    // This must happen before setting up any new listeners
-    setPredictions({});
+    // CRITICAL: Don't clear predictionsByUser - it's keyed by user ID
+    // Just ensure we're tracking the correct user
     setCommunitySentiment({});
     setSelectedMethod({});
     setPredictionsUserId(null);
+    
+    console.log('🔄 Setting up listener for user:', user.uid);
 
     const unsubProfile = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), (snap) => {
         if(snap.exists()) {
@@ -1628,61 +1693,187 @@ export default function RingsidePickemFinal() {
     // Use a flag to track if this listener is still valid
     let isListenerValid = true;
     
+    const predictionsPath = `artifacts/${appId}/users/${currentUserId}/predictions`;
+    console.log('🔍 SETTING UP PREDICTIONS LISTENER:', {
+      userId: currentUserId,
+      path: predictionsPath,
+      timestamp: new Date().toISOString()
+    });
+    
     const unsubPreds = onSnapshot(
       collection(db, 'artifacts', appId, 'users', currentUserId, 'predictions'), 
       (snap) => {
         // CRITICAL: Multiple checks to prevent stale predictions
         // 1. Check if listener is still valid
         if (!isListenerValid) {
+          console.log('🔒 Listener invalidated, ignoring update');
           return;
         }
         
         // 2. Check if this listener's user ID still matches the current user
         if (listenerUserIdRef.current !== currentUserId) {
+          console.log('🔒 Listener user ID mismatch, invalidating', {
+            listenerUserId: listenerUserIdRef.current,
+            expectedUserId: currentUserId
+          });
           isListenerValid = false;
           return;
         }
         
         // 3. Check if the global current user ref has changed
         if (currentUserIdRef.current !== currentUserId) {
+          console.log('🔒 Global user ref changed, invalidating', {
+            globalRef: currentUserIdRef.current,
+            expectedUserId: currentUserId
+          });
           isListenerValid = false;
           return;
         }
         
-        // 4. Final check - verify user object hasn't changed
-        if (!user || user.uid !== currentUserId) {
+        // CRITICAL: Don't use user object from closure - it might be stale
+        // Only use currentUserId which was captured when listener was created
+        
+        // CRITICAL: Verify the listener path matches what we expect
+        // Double-check that currentUserId hasn't changed
+        const actualCurrentUserId = currentUserIdRef.current;
+        if (actualCurrentUserId !== currentUserId) {
+          console.error('🔒 CRITICAL: User ID mismatch in listener!', {
+            listenerUserId: currentUserId,
+            actualCurrentUserId: actualCurrentUserId,
+            timestamp: new Date().toISOString()
+          });
           isListenerValid = false;
           return;
         }
         
         // All checks passed - this is a valid update for the current user
-        setPredictionsUserId(currentUserId);
+        console.log('✅ FIRESTORE LISTENER FIRED - Loading predictions for user:', currentUserId, {
+          path: predictionsPath,
+          docCount: snap.size,
+          docIds: snap.docs.map(d => d.id),
+          listenerUserId: listenerUserIdRef.current,
+          globalRef: currentUserIdRef.current,
+          timestamp: new Date().toISOString()
+        });
         
-        if (snap.empty) {
-          setPredictions({});
+        // CRITICAL: Verify each document belongs to this user by checking the path
+        // Firestore collection listeners should only return docs from the specified collection,
+        // but we'll add extra validation just in case
+        const preds = {}; 
+        snap.forEach(doc => {
+          // Verify the document path contains the correct user ID
+          const docPath = doc.ref.path;
+          if (!docPath.includes(`/users/${currentUserId}/predictions/`)) {
+            console.error('🔒 CRITICAL: Document path does not match expected user!', {
+              docPath,
+              expectedUserId: currentUserId,
+              docId: doc.id
+            });
+            return; // Skip this document
+          }
+          preds[doc.id] = doc.data();
+        });
+        
+        // CRITICAL: Use functional update to ensure we only set if user hasn't changed
+        setPredictionsUserId((prevUserId) => {
+          // Double-check that we're still for the same user
+          if (prevUserId !== null && prevUserId !== currentUserId) {
+            console.error('🔒 CRITICAL: User changed during prediction load!', {
+              prevUserId,
+              currentUserId,
+              globalRef: currentUserIdRef.current
+            });
+            return null; // Don't update if user changed
+          }
+          return currentUserId;
+        });
+        
+        if (Object.keys(preds).length === 0) {
+          console.log('📭 No predictions found for user:', currentUserId);
+          // Set empty predictions for this user in the keyed structure
+          setPredictionsByUser(prev => {
+            // Final safety check
+            if (currentUserIdRef.current !== currentUserId) {
+              console.error('🔒 CRITICAL: User changed during empty prediction set!');
+              return prev;
+            }
+            return {
+              ...prev,
+              [currentUserId]: {}
+            };
+          });
         } else {
-          const preds = {}; 
-          snap.forEach(doc => { preds[doc.id] = doc.data(); }); 
-          setPredictions(preds);
+          // Note: predictionsByUser might be empty here because we're reading it before the state update
+          // This is expected - the state will be updated in the setPredictionsByUser call below
+          console.log('📥 Loaded predictions for user:', currentUserId, {
+            eventCount: Object.keys(preds).length,
+            events: Object.keys(preds)
+          });
+          
+          // CRITICAL: Store predictions keyed by user ID - this prevents cross-contamination
+          setPredictionsByUser(prev => {
+            // Final safety check - only update if user hasn't changed
+            if (currentUserIdRef.current !== currentUserId) {
+              console.error('🔒 CRITICAL: User changed during prediction set! Not updating.', {
+                globalRef: currentUserIdRef.current,
+                expectedUserId: currentUserId
+              });
+              return prev; // Return previous state, don't update
+            }
+            
+            // CRITICAL: Final validation - ensure we're not mixing users
+            const previousUserKeys = Object.keys(prev);
+            if (previousUserKeys.length > 0 && !previousUserKeys.includes(currentUserId)) {
+              console.error('🔒 CRITICAL: Attempting to store predictions while other users exist in state!', {
+                currentUserId,
+                previousUserKeys,
+                eventCount: Object.keys(preds).length
+              });
+              // Clear all other users' predictions before storing this user's
+              console.log('🧹 Clearing other users\' predictions to prevent cross-contamination');
+              return {
+                [currentUserId]: preds
+              };
+            }
+            
+            console.log('✅ Storing predictions for user:', currentUserId, {
+              eventCount: Object.keys(preds).length,
+              previousUserKeys: previousUserKeys
+            });
+            
+            // Store predictions under the user's ID
+            return {
+              ...prev,
+              [currentUserId]: preds
+            };
+          });
         }
       },
       (error) => {
         console.error('Error listening to predictions:', error);
         if (isListenerValid && listenerUserIdRef.current === currentUserId) {
-          setPredictions({});
+          setPredictionsByUser({});
           setPredictionsUserId(null);
         }
       }
     );
     
     const cleanupPredictions = () => {
+      console.log('🧹 CLEANING UP predictions listener for user:', currentUserId);
       // Invalidate listener immediately
       isListenerValid = false;
       listenerUserIdRef.current = null;
       // Unsubscribe from Firestore
       unsubPreds();
-      // Clear predictions state
-      setPredictions({});
+      // CRITICAL: Clear predictionsByUser for this specific user to prevent cross-contamination
+      setPredictionsByUser(prev => {
+        const updated = { ...prev };
+        delete updated[currentUserId];
+        console.log('🧹 Removed predictions for user:', currentUserId, {
+          remainingUsers: Object.keys(updated)
+        });
+        return updated;
+      });
       setPredictionsUserId(null);
     };
     
@@ -1758,13 +1949,24 @@ export default function RingsidePickemFinal() {
       unsubResults(); 
       unsubLb(); 
       unsubEvents();
-      // 3. Clear all state as final step
-      setPredictions({});
+      // 3. Clear all state as final step (except predictionsByUser - it's keyed by user ID)
       setCommunitySentiment({});
       setSelectedMethod({});
       setPredictionsUserId(null);
     };
   }, [viewState, user?.uid]); // CRITICAL: Re-run when user changes to prevent stale data
+  
+  // Additional safety: Clear predictionsUserId if user changes while in dashboard
+  useEffect(() => {
+    if (viewState === 'dashboard' && user?.uid && predictionsUserId !== null && predictionsUserId !== user.uid) {
+      console.error('🔒 CRITICAL: User changed but predictionsUserId not updated! Resetting.', {
+        predictionsUserId,
+        currentUserId: user.uid
+      });
+      // Don't clear predictionsByUser - it's keyed by user ID
+      setPredictionsUserId(null);
+    }
+  }, [user?.uid, predictionsUserId, viewState]);
 
   // Calculate community sentiment when event is selected
   useEffect(() => {
@@ -2079,7 +2281,7 @@ export default function RingsidePickemFinal() {
       await signOut(auth);
       setUserProfile(null);
       // Clear all user-specific data on logout
-      setPredictions({});
+      // Don't clear predictionsByUser - it's keyed by user ID
       setCommunitySentiment({});
       setSelectedMethod({});
   };
@@ -2156,25 +2358,65 @@ export default function RingsidePickemFinal() {
       // Don't block, but log a warning
     }
     
-    const currentPreds = predictions[eventId] || {};
+    // CRITICAL: Get current user's predictions from keyed structure
+    // Use user.uid directly (it's fresh from the function parameter validation)
+    const currentUserPreds = predictionsByUser[user.uid] || {};
+    const currentPreds = currentUserPreds[eventId] || {};
     const newPreds = { 
       ...currentPreds, 
       [normalizedMatchId]: method ? { winner, method } : winner
     };
-    setPredictions(prev => ({ ...prev, [eventId]: newPreds }));
+    
+    // CRITICAL: Update local state using user-keyed structure
+    setCurrentUserPredictions({
+      ...currentUserPreds,
+      [eventId]: newPreds
+    });
     
     // CRITICAL: Always use user.uid from the user object, never from state
+    const predictionPath = `artifacts/${appId}/users/${user.uid}/predictions/${eventId}`;
+    
+    console.log('💾 SAVING PREDICTION:', {
+      userId: user.uid,
+      eventId,
+      matchId: normalizedMatchId,
+      winner,
+      method,
+      path: predictionPath,
+      fullPath: `artifacts/${appId}/users/${user.uid}/predictions/${eventId}`,
+      validationChecks: {
+        predictionsUserIdMatch: predictionsUserId === user.uid,
+        refMatch: currentUserIdRef.current === user.uid
+      },
+      timestamp: new Date().toISOString()
+    });
+    
+    // CRITICAL: Don't save __ownerId or __timestamp to Firestore - they're only for in-memory state
+    // newPreds only contains the actual prediction data, so it's safe to save
     setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'predictions', eventId), newPreds, { merge: true })
-      .then(() => setTimeout(() => calculateCommunitySentiment(eventId), 1000))
+      .then(() => {
+        if (process.env.NODE_ENV === 'development') {
+          console.log('✅ PREDICTION SAVED SUCCESSFULLY:', {
+            userId: user.uid,
+            eventId,
+            matchId: normalizedMatchId
+          });
+        }
+        setTimeout(() => calculateCommunitySentiment(eventId), 1000);
+      })
       .catch((error) => {
-        console.error('Error saving prediction:', error);
+        console.error('❌ Error saving prediction:', error);
         // On error, revert the optimistic update
-        setPredictions(prev => {
+        setPredictionsByUser(prev => {
+          if (!prev[user.uid]) return prev;
           const reverted = { ...prev };
-          if (reverted[eventId]) {
-            const eventPreds = { ...reverted[eventId] };
+          if (reverted[user.uid][eventId]) {
+            const eventPreds = { ...reverted[user.uid][eventId] };
             delete eventPreds[normalizedMatchId];
-            reverted[eventId] = eventPreds;
+            reverted[user.uid] = {
+              ...reverted[user.uid],
+              [eventId]: eventPreds
+            };
           }
           return reverted;
         });
@@ -2183,8 +2425,10 @@ export default function RingsidePickemFinal() {
 
   // Calculate community sentiment (pick percentages) for an event
   // Combines real user picks with simulated community data for a lively feel
+  // NOTE: This function can only access the current user's predictions due to Firestore security rules
+  // For true community sentiment, we'd need a server-side function or public aggregation
   const calculateCommunitySentiment = async (eventId) => {
-    if (!eventId) return;
+    if (!eventId || !user?.uid) return;
     
     // Get event data for match info
     const event = scrapedEvents.find(e => e.id === eventId) || 
@@ -2193,76 +2437,55 @@ export default function RingsidePickemFinal() {
     if (!event) return;
     
     try {
-      // Get all user predictions for this event
-      const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'users');
-      const usersSnapshot = await getDocs(usersRef);
+      // CRITICAL: Only access current user's predictions to avoid permissions errors
+      // For now, we'll use simulated data since we can't read other users' predictions
+      // In the future, this could be moved to a server-side function or use a public aggregation collection
+      
+      // Get current user's predictions only
+      const currentUserPreds = getCurrentUserPredictions();
+      const userPreds = currentUserPreds[eventId] || {};
       
       const matchCounts = {};
       
-      const promises = [];
-      usersSnapshot.forEach(userDoc => {
-        const userPredictionsRef = doc(db, 'artifacts', appId, 'users', userDoc.id, 'predictions', eventId);
-        promises.push(getDoc(userPredictionsRef));
-      });
-      
-      const predDocs = await Promise.all(promises);
-      
-      predDocs.forEach(predDoc => {
-        if (predDoc.exists()) {
-          const preds = predDoc.data();
-          Object.keys(preds).forEach(matchId => {
-            const pred = preds[matchId];
-            const winner = typeof pred === 'string' ? pred : (pred?.winner || pred);
-            
-            if (!matchCounts[matchId]) {
-              matchCounts[matchId] = { p1: 0, p2: 0 };
-            }
-            
-            const match = event.matches.find(m => m.id.toString() === matchId.toString());
-            if (match) {
-              if (winner === match.p1) matchCounts[matchId].p1++;
-              else if (winner === match.p2) matchCounts[matchId].p2++;
-            }
-          });
+      // Count predictions from current user only
+      Object.keys(userPreds).forEach(matchId => {
+        const pred = userPreds[matchId];
+        const winner = typeof pred === 'string' ? pred : (pred?.winner || pred);
+        
+        if (!matchCounts[matchId]) {
+          matchCounts[matchId] = { p1: 0, p2: 0 };
+        }
+        
+        const match = event.matches.find(m => m.id.toString() === matchId.toString());
+        if (match) {
+          if (winner === match.p1) matchCounts[matchId].p1++;
+          else if (winner === match.p2) matchCounts[matchId].p2++;
         }
       });
       
-      // Build sentiment for each match - use real data if available, otherwise simulate
+      // For now, we'll use simulated data since we can only see current user's predictions
+      // This is a limitation of client-side Firestore security rules
+      
+      // Build sentiment for each match - use simulated data for community feel
       const sentiment = {};
       event.matches.forEach(match => {
         const matchId = match.id.toString();
         const realCounts = matchCounts[matchId];
         const realTotal = realCounts ? (realCounts.p1 + realCounts.p2) : 0;
         
-        if (realTotal >= 5) {
-          // Enough real data - use it directly
-          sentiment[matchId] = {
-            p1: Math.round((realCounts.p1 / realTotal) * 100),
-            p2: Math.round((realCounts.p2 / realTotal) * 100),
-            total: realTotal,
-            simulated: false
-          };
-        } else {
-          // Not enough real data - blend with simulated sentiment
-          const simulated = generateSimulatedSentiment(match, eventId);
-          
-          if (realTotal > 0) {
-            // Blend real + simulated (weight real data more as it grows)
-            const realWeight = realTotal / 5; // 0.2 to 1.0
-            const simWeight = 1 - realWeight;
-            const realP1Pct = (realCounts.p1 / realTotal) * 100;
-            
-            sentiment[matchId] = {
-              p1: Math.round(realP1Pct * realWeight + simulated.p1 * simWeight),
-              p2: Math.round((100 - realP1Pct) * realWeight + simulated.p2 * simWeight),
-              total: simulated.total + realTotal,
-              simulated: false // Show as real since it has some real data
-            };
-          } else {
-            // Pure simulation
-            sentiment[matchId] = simulated;
-          }
-        }
+        // Since we can only see current user's predictions, always simulate community data
+        // In the future, this could be moved to a server-side function or use a public aggregation collection
+        const simulatedP1 = Math.floor(Math.random() * 30) + 35; // 35-65%
+        const simulatedP2 = 100 - simulatedP1;
+        
+        // Always use simulated data since we can't read other users' predictions
+        // In the future, this could be moved to a server-side function or use a public aggregation collection
+        sentiment[matchId] = {
+          p1: simulatedP1,
+          p2: simulatedP2,
+          total: 100,
+          simulated: true
+        };
       });
       
       setCommunitySentiment(prev => ({
@@ -2297,7 +2520,8 @@ export default function RingsidePickemFinal() {
       setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', 'global'), { [event.id]: results }, { merge: true });
       
       let correctCount = 0;
-      const myPreds = predictions[event.id] || {};
+      const currentUserPreds = getCurrentUserPredictions();
+      const myPreds = currentUserPreds[event.id] || {};
       event.matches.forEach(m => { 
         // FIXED: Use string key consistently
         const matchId = m.id.toString();
@@ -2425,33 +2649,50 @@ export default function RingsidePickemFinal() {
              }));
     });
     
-    // Then filter by event type (PPV or Weekly)
+    // Helper to parse date string
+    const parseDate = (dateStr) => {
+      if (!dateStr) return new Date(9999, 11, 31); // Put events without dates at the end
+      
+      // Try DD.MM.YYYY format first
+      const parts = dateStr.split('.');
+      if (parts.length === 3) {
+        return new Date(parts[2], parts[1] - 1, parts[0]);
+      }
+      
+      // Try "Month DD, YYYY" format (e.g., "Nov 30, 2025")
+      const parsed = new Date(dateStr);
+      if (!isNaN(parsed.getTime())) {
+        return parsed;
+      }
+      
+      return new Date(9999, 11, 31);
+    };
+    
+    // Filter by event type and date
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Reset to start of day
+    
     const filteredEvents = subscribedEvents.filter(ev => {
       const isWeekly = isWeeklyShow(ev.name);
-      return eventTypeFilter === 'weekly' ? isWeekly : !isWeekly;
+      const eventDate = parseDate(ev.date);
+      const isPast = eventDate < today;
+      
+      if (eventTypeFilter === 'past') {
+        return isPast && !isWeekly; // Past PPVs only
+      } else if (eventTypeFilter === 'weekly') {
+        return !isPast && isWeekly; // Upcoming weekly shows
+      } else {
+        return !isPast && !isWeekly; // Upcoming PPVs (default)
+      }
     });
     
-    // Sort by date (upcoming first)
-    // Supports both "DD.MM.YYYY" and "Month DD, YYYY" formats
+    // Sort by date
+    // For past events: most recent first (descending)
+    // For upcoming events: soonest first (ascending)
     return filteredEvents.sort((a, b) => {
-      const parseDate = (dateStr) => {
-        if (!dateStr) return new Date(9999, 11, 31); // Put events without dates at the end
-        
-        // Try DD.MM.YYYY format first
-        const parts = dateStr.split('.');
-        if (parts.length === 3) {
-          return new Date(parts[2], parts[1] - 1, parts[0]);
-        }
-        
-        // Try "Month DD, YYYY" format (e.g., "Nov 30, 2025")
-        const parsed = new Date(dateStr);
-        if (!isNaN(parsed.getTime())) {
-          return parsed;
-        }
-        
-        return new Date(9999, 11, 31);
-      };
-      return parseDate(a.date) - parseDate(b.date);
+      const dateA = parseDate(a.date);
+      const dateB = parseDate(b.date);
+      return eventTypeFilter === 'past' ? dateB - dateA : dateA - dateB;
     });
   }, [userProfile, scrapedEvents, eventTypeFilter]);
 
@@ -2858,6 +3099,17 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                   <Tv size={14} />
                   Weekly
                 </button>
+                <button 
+                  onClick={() => setEventTypeFilter('past')}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all flex items-center gap-2 ${
+                    eventTypeFilter === 'past' 
+                      ? 'bg-purple-600 text-white shadow-lg' 
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Clock size={14} />
+                  Past
+                </button>
               </div>
             </div>
             {myEvents.length === 0 ? (
@@ -2865,7 +3117,10 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
             ) : (
               myEvents.map(event => {
                 const promo = PROMOTIONS.find(p => p.id === event.promoId);
-                const isGraded = eventResults[event.id];
+                // Check if event is complete: either has results in eventResults, or has matches with winners (from scraper)
+                const hasEventResults = eventResults[event.id];
+                const hasMatchWinners = event.matches?.some(m => m.winner);
+                const isGraded = hasEventResults || hasMatchWinners;
                 return (
                   <div key={event.id} onClick={() => { setSelectedEvent(event); setActiveTab('event'); }} className="group relative bg-slate-900 hover:bg-slate-800 border border-slate-800 transition-all cursor-pointer rounded-2xl overflow-hidden shadow-xl" style={{ height: '200px' }}>
                     <div className="absolute inset-0"><EventBanner event={event} className="w-full h-full object-cover opacity-60 group-hover:opacity-40 transition-opacity duration-500 group-hover:scale-105" /><div className="absolute inset-0 bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950"></div></div>
@@ -2945,21 +3200,113 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                 // CRITICAL: Only show predictions if they belong to the current user
                 // Must be exact match - null means we haven't loaded predictions yet, so don't show any
                 // Also check that predictions object has entries for this user (extra safety)
-                const predictionsBelongToCurrentUser = 
-                  predictionsUserId === user?.uid && 
-                  predictionsUserId !== null && 
-                  user?.uid !== null &&
-                  currentUserIdRef.current === user?.uid; // Extra check using ref
+                const currentUserUid = user?.uid;
                 
-                // Only use predictions if they belong to current user
+                // CRITICAL: Get predictions from user-keyed structure
+                // This ensures we only access the current user's predictions
+                const getMyPickData = () => {
+                  // CRITICAL: Verify user ID matches before accessing predictions
+                  if (!currentUserUid) {
+                    console.log('🔒 No current user - blocking prediction access');
+                    return undefined;
+                  }
+                  
+                  if (predictionsUserId !== currentUserUid) {
+                    console.error('🔒 USER ISOLATION VIOLATION: predictionsUserId mismatch!', {
+                      predictionsUserId,
+                      currentUserId: currentUserUid,
+                      refUserId: currentUserIdRef.current,
+                      userObjectUid: user?.uid,
+                      eventId: selectedEvent.id,
+                      matchId: match.id,
+                      timestamp: new Date().toISOString()
+                    });
+                    return undefined;
+                  }
+                  
+                  if (predictionsUserId === null) {
+                    console.log('🔒 predictionsUserId is null - predictions not loaded yet');
+                    return undefined;
+                  }
+                  
+                  if (currentUserIdRef.current !== currentUserUid) {
+                    console.error('🔒 USER ISOLATION VIOLATION: currentUserIdRef mismatch!', {
+                      predictionsUserId,
+                      currentUserId: currentUserUid,
+                      refUserId: currentUserIdRef.current,
+                      userObjectUid: user?.uid,
+                      eventId: selectedEvent.id,
+                      matchId: match.id
+                    });
+                    return undefined;
+                  }
+                  
+                  // All checks passed - get predictions from user-keyed structure
+                  // CRITICAL: Access predictionsByUser directly using currentUserUid to avoid stale state
+                  // Don't rely on getCurrentUserPredictions() which might use stale user state
+                  const matchIdStr = match.id.toString();
+                  const userPredictions = predictionsByUser[currentUserUid] || {};
+                  const pickData = userPredictions[selectedEvent.id]?.[matchIdStr];
+                  
+                  // Only log if there's a potential issue
+                  if (pickData && process.env.NODE_ENV === 'development') {
+                    const predictionsByUserKeys = Object.keys(predictionsByUser);
+                    if (predictionsByUserKeys.length > 1) {
+                      console.warn('⚠️ Multiple users in predictionsByUser:', {
+                        currentUserUid,
+                        allUserKeys: predictionsByUserKeys,
+                        eventId: selectedEvent.id,
+                        matchId: matchIdStr
+                      });
+                    }
+                  }
+                  
+                  return pickData;
+                };
+                
+                // Debug logging for user isolation testing
+                const predictionsBelongToCurrentUser = 
+                  predictionsUserId === currentUserUid && 
+                  predictionsUserId !== null && 
+                  currentUserUid !== null &&
+                  currentUserIdRef.current === currentUserUid;
+                
+                // Only log warnings, not every render
+                if (predictionsUserId !== null && !predictionsBelongToCurrentUser) {
+                  console.error('🔒 BLOCKING predictions display - user mismatch', {
+                    predictionsUserId,
+                    currentUserId: currentUserUid,
+                    refUserId: currentUserIdRef.current,
+                    eventId: selectedEvent.id
+                  });
+                }
+                
+                // CRITICAL: Use the safe getter function that checks user ID every time
                 // FIXED: Use string key consistently
                 const matchIdStr = match.id.toString();
-                const myPickData = predictionsBelongToCurrentUser ? (predictions[selectedEvent.id]?.[matchIdStr]) : undefined;
-                // Handle both old format (string) and new format (object)
-                const myPick = myPickData ? (typeof myPickData === 'string' ? myPickData : (myPickData?.winner || myPickData)) : undefined;
-                const myMethod = myPickData && typeof myPickData === 'object' ? myPickData?.method : null;
+                const myPickData = getMyPickData();
+                
+                // CRITICAL: Final validation - ensure we have a valid user and predictions belong to them
+                if (myPickData && (!currentUserUid || predictionsUserId !== currentUserUid)) {
+                  console.error('🔒 CRITICAL: Blocking prediction display - user mismatch detected!', {
+                    hasPickData: !!myPickData,
+                    currentUserUid,
+                    predictionsUserId,
+                    matchId: matchIdStr,
+                    eventId: selectedEvent.id
+                  });
+                  // Force undefined to prevent showing wrong user's predictions
+                  var myPick = undefined;
+                  var myMethod = null;
+                } else {
+                  // Handle both old format (string) and new format (object)
+                  var myPick = myPickData ? (typeof myPickData === 'string' ? myPickData : (myPickData?.winner || myPickData)) : undefined;
+                  var myMethod = myPickData && typeof myPickData === 'object' ? myPickData?.method : null;
+                }
                 // FIXED: Use string key consistently
-                const actualWinner = eventResults[selectedEvent.id]?.[matchIdStr];
+                // For past events, check if match has a winner field from scraper
+                // Otherwise use eventResults (for simulated/manually entered results)
+                const actualWinner = match.winner || eventResults[selectedEvent.id]?.[matchIdStr];
                 const isCorrect = actualWinner && myPick === actualWinner;
                 const sentiment = communitySentiment[selectedEvent.id]?.[matchIdStr];
                 const matchKey = `${selectedEvent.id}-${matchIdStr}`;

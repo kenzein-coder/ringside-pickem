@@ -730,30 +730,47 @@ function parseEventDetails(html) {
           return !beforeLink.endsWith('(w/') && !beforeLink.endsWith('(');
         });
         
+        // Try multiple patterns to identify winner
+        let winnerPattern = null;
+        let winnerIndex = -1;
+        
+        // Pattern 1: "defeats" (most common on Cagematch)
         if (resultsHtml.includes('defeats')) {
-          const defeatsIndex = resultsHtml.indexOf('defeats');
+          winnerPattern = 'defeats';
+          winnerIndex = resultsHtml.indexOf('defeats');
+        }
+        // Pattern 2: "wins" or "wins by"
+        else if (resultsHtml.includes('wins by') || resultsHtml.includes(' wins ')) {
+          winnerPattern = resultsHtml.includes('wins by') ? 'wins by' : ' wins ';
+          winnerIndex = resultsHtml.indexOf(winnerPattern);
+        }
+        // Pattern 3: "beats"
+        else if (resultsHtml.includes('beats')) {
+          winnerPattern = 'beats';
+          winnerIndex = resultsHtml.indexOf('beats');
+        }
+        
+        if (winnerPattern && winnerIndex >= 0) {
+          // Get all wrestlers before the pattern as winner(s)
+          const beforePattern = mainWrestlers.filter(l => l.position < winnerIndex);
+          // Get all wrestlers after the pattern as loser(s)
+          const afterPattern = mainWrestlers.filter(l => l.position > winnerIndex);
           
-          // Get all wrestlers before "defeats" as team 1
-          const beforeDefeats = mainWrestlers.filter(l => l.position < defeatsIndex);
-          // Get all wrestlers after "defeats" as team 2
-          const afterDefeats = mainWrestlers.filter(l => l.position > defeatsIndex);
-          
-          if (beforeDefeats.length > 0) {
-            p1Members = beforeDefeats.map(w => ({ name: w.name, image: w.imageUrl }));
-            // For display, join names with " & " if multiple, otherwise use single name
-            p1 = beforeDefeats.length > 1 
-              ? beforeDefeats.map(w => w.name).join(' & ')
-              : beforeDefeats[0].name;
-            p1Image = beforeDefeats[0].imageUrl;
+          if (beforePattern.length > 0) {
+            p1Members = beforePattern.map(w => ({ name: w.name, image: w.imageUrl }));
+            p1 = beforePattern.length > 1 
+              ? beforePattern.map(w => w.name).join(' & ')
+              : beforePattern[0].name;
+            p1Image = beforePattern[0].imageUrl;
             winner = p1;
           }
           
-          if (afterDefeats.length > 0) {
-            p2Members = afterDefeats.map(w => ({ name: w.name, image: w.imageUrl }));
-            p2 = afterDefeats.length > 1 
-              ? afterDefeats.map(w => w.name).join(' & ')
-              : afterDefeats[0].name;
-            p2Image = afterDefeats[0].imageUrl;
+          if (afterPattern.length > 0) {
+            p2Members = afterPattern.map(w => ({ name: w.name, image: w.imageUrl }));
+            p2 = afterPattern.length > 1 
+              ? afterPattern.map(w => w.name).join(' & ')
+              : afterPattern[0].name;
+            p2Image = afterPattern[0].imageUrl;
             loser = p2;
           }
         } else if (mainWrestlers.length >= 2) {
