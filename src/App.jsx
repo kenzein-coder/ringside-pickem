@@ -2229,17 +2229,23 @@ export default function RingsidePickemFinal() {
       console.error("Google sign in error:", error);
       setIsLoggingIn(false);
       
+      // Provide helpful error messages for common Firebase auth errors
       let errorMessage = "Failed to sign in with Google. ";
-      if (error.code === 'auth/popup-closed-by-user') {
+      if (error.code === 'auth/unauthorized-domain') {
+        const currentDomain = window.location.hostname;
+        errorMessage = `Unauthorized domain error. Your domain "${currentDomain}" is not authorized in Firebase.\n\nTo fix this:\n1. Go to Firebase Console (https://console.firebase.google.com)\n2. Select your project\n3. Go to Authentication → Settings\n4. Scroll to "Authorized domains"\n5. Click "Add domain"\n6. Add: ${currentDomain}\n7. For localhost development, also add: localhost\n\nAfter adding the domain, wait a few seconds and try again.`;
+      } else if (error.code === 'auth/popup-closed-by-user') {
         errorMessage = "Sign-in popup was closed. Please try again.";
       } else if (error.code === 'auth/popup-blocked') {
-        errorMessage = "Popup was blocked. Please allow popups for this site.";
+        errorMessage = "Popup was blocked. Please allow popups for this site and try again.";
       } else if (error.code === 'auth/account-exists-with-different-credential') {
         errorMessage = "An account already exists with this email. Please sign in with your existing method.";
       } else if (error.code === 'auth/cancelled-popup-request') {
         errorMessage = "Sign-in was cancelled. Please try again.";
+      } else if (error.message) {
+        errorMessage += error.message;
       } else {
-        errorMessage += error.message || "Please try again.";
+        errorMessage += "Please try again.";
       }
       setLoginError(errorMessage);
     }
@@ -2682,14 +2688,45 @@ export default function RingsidePickemFinal() {
       
       // Merge scraped events with initial events
       const merged = scrapedEvents.map(scrapedEv => {
-        // Try to find matching INITIAL_EVENT
-        const normalizedName = scrapedEv.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const matchingInitial = initialEventsMap[normalizedName] || initialEventsMap[scrapedEv.id];
+        // Try to find matching INITIAL_EVENT by ID first, then by normalized name
+        const matchingInitial = initialEventsMap[scrapedEv.id];
         
-        // If scraped event has no matches but we have hardcoded ones, use those
-        if ((!scrapedEv.matches || scrapedEv.matches.length === 0) && matchingInitial?.matches) {
-          return { ...scrapedEv, matches: matchingInitial.matches };
+        // If no exact ID match, try normalized name matching
+        if (!matchingInitial) {
+          const normalizedName = scrapedEv.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+          // Try exact match first
+          let match = initialEventsMap[normalizedName];
+          
+          // If no exact match, try partial matching (for events like "Survivor Series" vs "Survivor Series: WarGames 2025")
+          if (!match && normalizedName.length >= 8) {
+            // Find INITIAL_EVENT where the name contains or is contained in the scraped name
+            for (const [key, initialEv] of Object.entries(initialEventsMap)) {
+              if (typeof initialEv === 'object' && initialEv.name) {
+                const initialNormalized = initialEv.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+                // Check if one contains the other (for similar event names)
+                if ((normalizedName.includes(initialNormalized) || initialNormalized.includes(normalizedName)) &&
+                    Math.abs(normalizedName.length - initialNormalized.length) <= 15) {
+                  match = initialEv;
+                  break;
+                }
+              }
+            }
+          }
+          
+          if (match) {
+            // If scraped event has no matches but we have hardcoded ones, use those
+            if ((!scrapedEv.matches || scrapedEv.matches.length === 0) && match.matches && match.matches.length > 0) {
+              return { ...scrapedEv, matches: match.matches };
+            }
+          }
+        } else {
+          // Exact ID match found
+          // If scraped event has no matches but we have hardcoded ones, use those
+          if ((!scrapedEv.matches || scrapedEv.matches.length === 0) && matchingInitial.matches && matchingInitial.matches.length > 0) {
+            return { ...scrapedEv, matches: matchingInitial.matches };
+          }
         }
+        
         return scrapedEv;
       });
       

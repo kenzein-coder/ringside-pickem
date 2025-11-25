@@ -308,7 +308,8 @@ function generateFutureWeeklyShows() {
       promotionName: 'All Elite Wrestling',
       name: `AEW Dynamite #${dynamiteNum}`,
       date: formatDateToReadable(`${dynamiteDate.getDate().toString().padStart(2, '0')}.${(dynamiteDate.getMonth() + 1).toString().padStart(2, '0')}.${dynamiteDate.getFullYear()}`),
-      isWeekly: true
+      isWeekly: true,
+      matches: [] // Empty matches array - will be populated when event is announced/scraped
     });
     dynamiteDate.setDate(dynamiteDate.getDate() + 7);
     dynamiteNum++;
@@ -324,7 +325,8 @@ function generateFutureWeeklyShows() {
       promotionName: 'All Elite Wrestling',
       name: `AEW Collision #${collisionNum}`,
       date: formatDateToReadable(`${collisionDate.getDate().toString().padStart(2, '0')}.${(collisionDate.getMonth() + 1).toString().padStart(2, '0')}.${collisionDate.getFullYear()}`),
-      isWeekly: true
+      isWeekly: true,
+      matches: [] // Empty matches array - will be populated when event is announced/scraped
     });
     collisionDate.setDate(collisionDate.getDate() + 7);
     collisionNum++;
@@ -340,7 +342,8 @@ function generateFutureWeeklyShows() {
       promotionName: 'World Wrestling Entertainment',
       name: `WWE Monday Night RAW #${rawNum}`,
       date: formatDateToReadable(`${rawDate.getDate().toString().padStart(2, '0')}.${(rawDate.getMonth() + 1).toString().padStart(2, '0')}.${rawDate.getFullYear()}`),
-      isWeekly: true
+      isWeekly: true,
+      matches: [] // Empty matches array - will be populated when event is announced/scraped
     });
     rawDate.setDate(rawDate.getDate() + 7);
     rawNum++;
@@ -356,7 +359,8 @@ function generateFutureWeeklyShows() {
       promotionName: 'World Wrestling Entertainment',
       name: `WWE Friday Night SmackDown #${smackdownNum}`,
       date: formatDateToReadable(`${smackdownDate.getDate().toString().padStart(2, '0')}.${(smackdownDate.getMonth() + 1).toString().padStart(2, '0')}.${smackdownDate.getFullYear()}`),
-      isWeekly: true
+      isWeekly: true,
+      matches: [] // Empty matches array - will be populated when event is announced/scraped
     });
     smackdownDate.setDate(smackdownDate.getDate() + 7);
     smackdownNum++;
@@ -372,7 +376,8 @@ function generateFutureWeeklyShows() {
       promotionName: 'World Wrestling Entertainment',
       name: `WWE NXT #${nxtNum}`,
       date: formatDateToReadable(`${nxtDate.getDate().toString().padStart(2, '0')}.${(nxtDate.getMonth() + 1).toString().padStart(2, '0')}.${nxtDate.getFullYear()}`),
-      isWeekly: true
+      isWeekly: true,
+      matches: [] // Empty matches array - will be populated when event is announced/scraped
     });
     nxtDate.setDate(nxtDate.getDate() + 7);
     nxtNum++;
