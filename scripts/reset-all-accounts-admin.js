@@ -202,12 +202,39 @@ async function resetAllAccounts() {
       console.log('⚠️  Could not reset scores (may not exist)\n');
     }
 
+    // 5. Reset images cache (optional - uncomment if you want to reset cached images too)
+    console.log('🔄 Resetting images cache...');
+    const imagesRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('images');
+    try {
+      const imageTypes = ['promotions', 'wrestlers', 'events'];
+      let deletedImages = 0;
+      
+      for (const imageType of imageTypes) {
+        const imageTypeRef = imagesRef.doc(imageType);
+        const imageDoc = await imageTypeRef.get();
+        if (imageDoc.exists()) {
+          await imageTypeRef.delete();
+          deletedImages++;
+          console.log(`   Deleted ${imageType} images cache`);
+        }
+      }
+      
+      if (deletedImages > 0) {
+        console.log(`✅ Reset ${deletedImages} image cache collections\n`);
+      } else {
+        console.log('✅ No image cache to reset\n');
+      }
+    } catch (error) {
+      console.log('⚠️  Could not reset images cache (may not exist)\n');
+    }
+
     console.log('✅ Complete reset finished!');
     console.log(`\n📊 Summary:`);
     console.log(`   - Deleted ${deletedAuthUsers} Firebase Authentication users`);
     console.log(`   - Deleted ${deletedProfiles} user profiles`);
     console.log(`   - Deleted ${deletedPredictions} prediction documents`);
     console.log(`   - Reset global scores`);
+    console.log(`   - Reset images cache`);
 
   } catch (error) {
     console.error('❌ Error during reset:', error);

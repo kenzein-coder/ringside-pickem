@@ -100,10 +100,52 @@ googleProvider.setCustomParameters({
 // Cache for Wikimedia search results to avoid repeated API calls
 // To clear cache: wikimediaCache.clear() or restart the app
 const wikimediaCache = new Map();
+const promotionLogoCache = new Map();
 
 // Function to clear the image cache (useful for re-scraping)
 export const clearImageCache = () => {
   wikimediaCache.clear();
+  promotionLogoCache.clear();
+};
+
+// Helper function to search Wikimedia Commons for promotion logos
+const searchWikimediaCommonsForLogo = async (promotionName) => {
+  // Check cache first
+  if (promotionLogoCache.has(promotionName)) {
+    return promotionLogoCache.get(promotionName);
+  }
+  
+  try {
+    // Search for promotion logos/logos in Wikimedia Commons
+    const searchQuery = encodeURIComponent(`${promotionName} logo`);
+    const apiUrl = `https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&list=search&srsearch=${searchQuery}&srnamespace=6&srlimit=5`;
+    
+    const response = await fetch(apiUrl);
+    const data = await response.json();
+    
+    if (data.query?.search?.length > 0) {
+      // Get image info for the first result
+      const pageId = data.query.search[0].pageid;
+      const imageInfoUrl = `https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&pageids=${pageId}&prop=imageinfo&iiprop=url&iiurlwidth=200`;
+      
+      const imageResponse = await fetch(imageInfoUrl);
+      const imageData = await imageResponse.json();
+      
+      const pages = imageData.query?.pages;
+      if (pages && pages[pageId]?.imageinfo?.[0]?.thumburl) {
+        const imageUrl = pages[pageId].imageinfo[0].thumburl;
+        // Cache the result
+        promotionLogoCache.set(promotionName, imageUrl);
+        return imageUrl;
+      }
+    }
+  } catch (error) {
+    console.log(`Wikimedia logo search failed for ${promotionName}:`, error);
+  }
+  
+  // Cache null result to avoid repeated failed searches
+  promotionLogoCache.set(promotionName, null);
+  return null;
 };
 
 // Helper function to search Wikimedia Commons for wrestler images
@@ -176,6 +218,675 @@ const getProxiedImageUrl = (originalUrl, width = 400, height = 500, proxyType = 
     images: `https://images.weserv.nl/?url=${encoded}&w=${width}&h=${height}&fit=cover&a=attention`,
   };
   return proxies[proxyType] || proxies.wsrv;
+};
+
+// Promotion logos - using Wikipedia Commons and alternative sources
+const PROMOTION_LOGOS = {
+  // WWE - Wikipedia Commons logos
+  'wwe': 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9a/WWE_Logo.svg/200px-WWE_Logo.svg.png',
+  '1': 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9a/WWE_Logo.svg/200px-WWE_Logo.svg.png',
+  
+  // AEW - Wikipedia Commons logos
+  'aew': 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7d/All_Elite_Wrestling_logo.svg/200px-All_Elite_Wrestling_logo.svg.png',
+  '2287': 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7d/All_Elite_Wrestling_logo.svg/200px-All_Elite_Wrestling_logo.svg.png',
+  
+  // NJPW - Wikipedia Commons logos
+  'njpw': 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/4a/New_Japan_Pro-Wrestling_logo.svg/200px-New_Japan_Pro-Wrestling_logo.svg.png',
+  '7': 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/4a/New_Japan_Pro-Wrestling_logo.svg/200px-New_Japan_Pro-Wrestling_logo.svg.png',
+  
+  // TNA/Impact - Wikipedia Commons logos
+  'tna': 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Impact_Wrestling_logo.svg/200px-Impact_Wrestling_logo.svg.png',
+  '5': 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Impact_Wrestling_logo.svg/200px-Impact_Wrestling_logo.svg.png',
+  
+  // ROH - Wikipedia Commons logos
+  'roh': 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/6a/Ring_of_Honor_logo.svg/200px-Ring_of_Honor_logo.svg.png',
+  '122': 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/6a/Ring_of_Honor_logo.svg/200px-Ring_of_Honor_logo.svg.png',
+  
+  // Stardom
+  'stardom': 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0a/World_Wonder_Ring_Stardom_logo.svg/200px-World_Wonder_Ring_Stardom_logo.svg.png',
+  '745': 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0a/World_Wonder_Ring_Stardom_logo.svg/200px-World_Wonder_Ring_Stardom_logo.svg.png',
+  
+  // CMLL - Wikipedia Commons (multiple fallback options)
+  'cmll': 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/4c/CMLL_logo.svg/200px-CMLL_logo.svg.png',
+  'Consejo Mundial de Lucha Libre': 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/4c/CMLL_logo.svg/200px-CMLL_logo.svg.png',
+  
+  // AAA - Wikipedia Commons (Lucha Libre AAA Worldwide)
+  'aaa': 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8e/Lucha_Libre_AAA_Worldwide_logo.svg/200px-Lucha_Libre_AAA_Worldwide_logo.svg.png',
+  'Lucha Libre AAA Worldwide': 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8e/Lucha_Libre_AAA_Worldwide_logo.svg/200px-Lucha_Libre_AAA_Worldwide_logo.svg.png',
+  
+  // GCW - Try multiple sources (will be searched if this fails)
+  'gcw': 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/6f/Game_Changer_Wrestling_logo.png/200px-Game_Changer_Wrestling_logo.png',
+  'Game Changer Wrestling': 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/6f/Game_Changer_Wrestling_logo.png/200px-Game_Changer_Wrestling_logo.png',
+  
+  // MLW - Try multiple sources (will be searched if this fails)
+  'mlw': 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9a/Major_League_Wrestling_logo.svg/200px-Major_League_Wrestling_logo.svg.png',
+  'Major League Wrestling': 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9a/Major_League_Wrestling_logo.svg/200px-Major_League_Wrestling_logo.svg.png',
+};
+
+// Helper function to save image URL to Firestore
+const saveImageToFirestore = async (type, identifier, imageUrl) => {
+  if (!db || !appId) return;
+  
+  try {
+    const imageDoc = doc(db, 'artifacts', appId, 'public', 'data', 'images', type);
+    const currentData = await getDoc(imageDoc);
+    const existingImages = currentData.exists() ? currentData.data() : {};
+    
+    await setDoc(imageDoc, {
+      ...existingImages,
+      [identifier]: imageUrl,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  } catch (error) {
+    console.log(`Failed to save image to Firestore:`, error);
+  }
+};
+
+// Helper function to get image URL from Firestore
+const getImageFromFirestore = async (type, identifier) => {
+  if (!db || !appId) return null;
+  
+  try {
+    const imageDoc = doc(db, 'artifacts', appId, 'public', 'data', 'images', type);
+    const imageData = await getDoc(imageDoc);
+    
+    if (imageData.exists()) {
+      const data = imageData.data();
+      return data[identifier] || null;
+    }
+  } catch (error) {
+    console.log(`Failed to get image from Firestore:`, error);
+  }
+  
+  return null;
+};
+
+// Helper function to check if a local image exists
+// In Vite, files in /public are served at the root URL
+const checkLocalImage = async (path) => {
+  try {
+    // Try to fetch the image - if it exists, return the path
+    // Use GET request with cache control to check if file exists
+    const response = await fetch(path, { 
+      method: 'GET',
+      cache: 'no-cache'
+    });
+    if (response.ok && response.status === 200) {
+      // Verify it's actually an image by checking content type
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.startsWith('image/')) {
+        return path;
+      }
+    }
+  } catch (error) {
+    // Image doesn't exist locally or failed to load
+  }
+  return null;
+};
+
+// Helper function to get local promotion logo path
+const getLocalPromotionLogo = (promotionId) => {
+  // Try common file extensions
+  const extensions = ['svg', 'png', 'jpg', 'webp'];
+  const basePath = `/images/promotions/${promotionId.toLowerCase()}`;
+  
+  // Return the first path - the checkLocalImage function will verify it exists
+  // We'll check all extensions in the search function
+  return basePath;
+};
+
+// Helper function to search Wikipedia page for logo in infobox
+const searchWikipediaInfobox = async (pageTitle) => {
+  try {
+    // Try to get the full page HTML and extract infobox image
+    const apiUrl = `https://en.wikipedia.org/api/rest_v1/page/html/${encodeURIComponent(pageTitle)}`;
+    const response = await fetch(apiUrl);
+    if (!response.ok) return null;
+    
+    const html = await response.text();
+    // Look for infobox image patterns
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    const infobox = doc.querySelector('.infobox, .infobox_v2, .infobox_v3');
+    if (infobox) {
+      const img = infobox.querySelector('img');
+      if (img && img.src) {
+        // Convert relative URLs to absolute
+        if (img.src.startsWith('//')) {
+          return `https:${img.src}`;
+        } else if (img.src.startsWith('/')) {
+          return `https://en.wikipedia.org${img.src}`;
+        }
+        return img.src;
+      }
+    }
+  } catch (error) {
+    // Silently fail
+  }
+  return null;
+};
+
+// Helper function to try multiple Wikimedia Commons search variations
+const searchWikimediaCommonsVariations = async (promotionName) => {
+  const searchVariations = [
+    `${promotionName} logo`,
+    `${promotionName} wrestling logo`,
+    `Logo of ${promotionName}`,
+    `${promotionName} emblem`,
+  ];
+  
+  for (const searchQuery of searchVariations) {
+    try {
+      const apiUrl = `https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&list=search&srsearch=${encodeURIComponent(searchQuery)}&srnamespace=6&srlimit=3`;
+      const response = await fetch(apiUrl);
+      const data = await response.json();
+      
+      if (data.query?.search?.length > 0) {
+        // Try each result
+        for (const result of data.query.search) {
+          const pageId = result.pageid;
+          const imageInfoUrl = `https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&pageids=${pageId}&prop=imageinfo&iiprop=url&iiurlwidth=200`;
+          const imageResponse = await fetch(imageInfoUrl);
+          const imageData = await imageResponse.json();
+          
+          const pages = imageData.query?.pages;
+          if (pages && pages[pageId]?.imageinfo?.[0]?.thumburl) {
+            const imageUrl = pages[pageId].imageinfo[0].thumburl;
+            // Verify it's likely a logo (check filename)
+            const filename = result.title.toLowerCase();
+            if (filename.includes('logo') || filename.includes('emblem') || filename.includes('symbol')) {
+              return imageUrl;
+            }
+          }
+        }
+      }
+    } catch (error) {
+      continue;
+    }
+  }
+  return null;
+};
+
+// Helper function to search multiple sources for promotion logos
+const searchPromotionLogo = async (promotionId, promotionName) => {
+  // PRIORITY 1: Check for local image files first (user-provided)
+  // Files should be placed in: public/images/promotions/{promotionId}.{ext}
+  // Check PNG first since that's what most users provide, then SVG, then others
+  const extensions = ['png', 'svg', 'jpg', 'jpeg', 'webp'];
+  for (const ext of extensions) {
+    const localPath = `/images/promotions/${promotionId.toLowerCase()}.${ext}`;
+    const localImage = await checkLocalImage(localPath);
+    if (localImage) {
+      // Save local path to Firestore for future use
+      saveImageToFirestore('promotions', promotionId, localImage);
+      return localImage;
+    }
+  }
+  
+  // PRIORITY 2: Check Firestore cache
+  const firestoreUrl = await getImageFromFirestore('promotions', promotionId);
+  if (firestoreUrl) {
+    return firestoreUrl;
+  }
+  
+  // PRIORITY 3: Check hardcoded logos
+  if (PROMOTION_LOGOS[promotionId]) {
+    const url = PROMOTION_LOGOS[promotionId];
+    // Save to Firestore for future use
+    saveImageToFirestore('promotions', promotionId, url);
+    return url;
+  }
+  
+  // Try Wikimedia Commons with variations
+  try {
+    const wikimediaUrl = await searchWikimediaCommonsVariations(promotionName);
+    if (wikimediaUrl) {
+      saveImageToFirestore('promotions', promotionId, wikimediaUrl);
+      return wikimediaUrl;
+    }
+  } catch (error) {
+    console.log(`Wikimedia search failed for ${promotionName}`);
+  }
+  
+  // Try original Wikimedia Commons search as fallback
+  try {
+    const wikimediaUrl = await searchWikimediaCommonsForLogo(promotionName);
+    if (wikimediaUrl) {
+      saveImageToFirestore('promotions', promotionId, wikimediaUrl);
+      return wikimediaUrl;
+    }
+  } catch (error) {
+    console.log(`Wikimedia search failed for ${promotionName}`);
+  }
+  
+  // Try Wikipedia API search with variations
+  try {
+    const nameVariations = [
+      promotionName,
+      `${promotionName} (wrestling)`,
+      `${promotionName} wrestling`,
+      `List of ${promotionName} events`,
+    ];
+    
+    for (const nameVar of nameVariations) {
+      try {
+        const apiUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(nameVar)}`;
+        const response = await fetch(apiUrl);
+        if (!response.ok) continue;
+        
+        const data = await response.json();
+        
+        if (data.thumbnail?.source) {
+          const imageUrl = data.thumbnail.source;
+          saveImageToFirestore('promotions', promotionId, imageUrl);
+          return imageUrl;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+  } catch (error) {
+    console.log(`Wikipedia API search failed for ${promotionName}`);
+  }
+  
+  // Try Wikipedia infobox extraction
+  try {
+    const nameVariations = [
+      promotionName,
+      `${promotionName} (wrestling)`,
+    ];
+    
+    for (const nameVar of nameVariations) {
+      const infoboxImage = await searchWikipediaInfobox(nameVar);
+      if (infoboxImage) {
+        saveImageToFirestore('promotions', promotionId, infoboxImage);
+        return infoboxImage;
+      }
+    }
+  } catch (error) {
+    // Silently fail
+  }
+  
+  // Try direct Wikipedia Commons URL patterns (common logo file patterns)
+  try {
+    const normalizedName = promotionName.toLowerCase()
+      .replace(/[^a-z0-9]/g, '_')
+      .replace(/_+/g, '_');
+    
+    const commonPatterns = [
+      `${normalizedName}_logo.svg`,
+      `${normalizedName}_logo.png`,
+      `Logo_of_${normalizedName}.svg`,
+      `Logo_of_${normalizedName}.png`,
+      `${normalizedName}_emblem.svg`,
+      `${normalizedName}_emblem.png`,
+    ];
+    
+    for (const pattern of commonPatterns) {
+      try {
+        // Try to fetch the file info directly
+        const fileUrl = `File:${pattern}`;
+        const apiUrl = `https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&titles=${encodeURIComponent(fileUrl)}&prop=imageinfo&iiprop=url&iiurlwidth=200`;
+        const response = await fetch(apiUrl);
+        const data = await response.json();
+        
+        const pages = data.query?.pages;
+        if (pages) {
+          const pageId = Object.keys(pages)[0];
+          const page = pages[pageId];
+          if (page.imageinfo?.[0]?.thumburl && page.missing === undefined) {
+            const imageUrl = page.imageinfo[0].thumburl;
+            saveImageToFirestore('promotions', promotionId, imageUrl);
+            return imageUrl;
+          }
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+  } catch (error) {
+    // Silently fail
+  }
+  
+  return null;
+};
+
+// Helper function to search multiple sources for wrestler images
+const searchWrestlerImage = async (wrestlerName) => {
+  // Check Firestore first
+  const firestoreUrl = await getImageFromFirestore('wrestlers', wrestlerName);
+  if (firestoreUrl) {
+    return firestoreUrl;
+  }
+  
+  // Check hardcoded images
+  if (WRESTLER_IMAGES[wrestlerName]) {
+    const url = WRESTLER_IMAGES[wrestlerName];
+    // Save to Firestore for future use
+    saveImageToFirestore('wrestlers', wrestlerName, url);
+    return url;
+  }
+  
+  // Try Wikimedia Commons
+  try {
+    const wikimediaUrl = await searchWikimediaCommons(wrestlerName);
+    if (wikimediaUrl) {
+      // Save to Firestore
+      saveImageToFirestore('wrestlers', wrestlerName, wikimediaUrl);
+      return wikimediaUrl;
+    }
+  } catch (error) {
+    console.log(`Wikimedia search failed for ${wrestlerName}`);
+  }
+  
+  // Try Wikipedia API search
+  try {
+    // Try different variations of the wrestler name
+    const nameVariations = [
+      wrestlerName,
+      wrestlerName.replace(/\./g, ''), // Remove periods
+      wrestlerName.split(' ').join('_'), // Replace spaces with underscores
+      `${wrestlerName} (wrestler)`,
+      `${wrestlerName} (professional wrestler)`,
+    ];
+    
+    for (const nameVar of nameVariations) {
+      try {
+        const apiUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(nameVar)}`;
+        const response = await fetch(apiUrl);
+        if (!response.ok) continue;
+        
+        const data = await response.json();
+        
+        if (data.thumbnail?.source) {
+          const imageUrl = data.thumbnail.source;
+          saveImageToFirestore('wrestlers', wrestlerName, imageUrl);
+          return imageUrl;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+  } catch (error) {
+    console.log(`Wikipedia API search failed for ${wrestlerName}`);
+  }
+  
+  // Try Wikipedia infobox extraction
+  try {
+    const nameVariations = [
+      wrestlerName,
+      `${wrestlerName} (wrestler)`,
+    ];
+    
+    for (const nameVar of nameVariations) {
+      const infoboxImage = await searchWikipediaInfobox(nameVar);
+      if (infoboxImage) {
+        saveImageToFirestore('wrestlers', wrestlerName, infoboxImage);
+        return infoboxImage;
+      }
+    }
+  } catch (error) {
+    // Silently fail
+  }
+  
+  return null;
+};
+
+// Helper function to search Wikimedia Commons for event posters/banners
+const searchWikimediaCommonsForEvent = async (eventName) => {
+  try {
+    // Search for event posters/banners in Wikimedia Commons with multiple variations
+    const searchQueries = [
+      `${eventName} poster`,
+      `${eventName} banner`,
+      `${eventName} wrestling event`,
+      `${eventName} PPV`,
+      `${eventName} pay-per-view`,
+      `Poster ${eventName}`,
+      `${eventName} promotional poster`,
+      `${eventName} event poster`,
+    ];
+    
+    for (const searchQuery of searchQueries) {
+      try {
+        const encodedQuery = encodeURIComponent(searchQuery);
+        const apiUrl = `https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&list=search&srsearch=${encodedQuery}&srnamespace=6&srlimit=10`;
+        
+        const response = await fetch(apiUrl);
+        const data = await response.json();
+        
+        if (data.query?.search?.length > 0) {
+          // Try each result to find the best match
+          for (const result of data.query.search) {
+            const filename = result.title.toLowerCase();
+            // Prefer files that contain "poster", "banner", or "promotional"
+            if (filename.includes('poster') || filename.includes('banner') || filename.includes('promotional')) {
+              const pageId = result.pageid;
+              const imageInfoUrl = `https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&pageids=${pageId}&prop=imageinfo&iiprop=url&iiurlwidth=800`;
+              
+              const imageResponse = await fetch(imageInfoUrl);
+              const imageData = await imageResponse.json();
+              
+              const pages = imageData.query?.pages;
+              if (pages && pages[pageId]?.imageinfo?.[0]?.thumburl) {
+                const imageUrl = pages[pageId].imageinfo[0].thumburl;
+                return imageUrl;
+              }
+            }
+          }
+          
+          // If no poster/banner found, use first result
+          const pageId = data.query.search[0].pageid;
+          const imageInfoUrl = `https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&pageids=${pageId}&prop=imageinfo&iiprop=url&iiurlwidth=800`;
+          
+          const imageResponse = await fetch(imageInfoUrl);
+          const imageData = await imageResponse.json();
+          
+          const pages = imageData.query?.pages;
+          if (pages && pages[pageId]?.imageinfo?.[0]?.thumburl) {
+            const imageUrl = pages[pageId].imageinfo[0].thumburl;
+            return imageUrl;
+          }
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+  } catch (error) {
+    console.log(`Wikimedia event search failed for ${eventName}:`, error);
+  }
+  
+  return null;
+};
+
+// Helper function to search multiple sources for event posters/banners
+const searchEventPoster = async (eventId, eventName) => {
+  // PRIORITY 1: Check for local image files first (user-provided)
+  // Files should be placed in: public/images/events/{eventId}.{ext}
+  const extensions = ['jpg', 'jpeg', 'png', 'webp'];
+  for (const ext of extensions) {
+    // Try both eventId and sanitized eventName
+    const sanitizedId = eventId.toLowerCase().replace(/[^a-z0-9]/g, '-');
+    const sanitizedName = eventName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+    
+    const localPaths = [
+      `/images/events/${sanitizedId}.${ext}`,
+      `/images/events/${sanitizedName}.${ext}`,
+    ];
+    
+    for (const localPath of localPaths) {
+      const localImage = await checkLocalImage(localPath);
+      if (localImage) {
+        // Save local path to Firestore for future use
+        saveImageToFirestore('events', eventId, localImage);
+        return localImage;
+      }
+    }
+  }
+  
+  // PRIORITY 2: Check Firestore cache
+  const firestoreUrl = await getImageFromFirestore('events', eventId);
+  if (firestoreUrl) {
+    return firestoreUrl;
+  }
+  
+  // PRIORITY 3: Try Wikimedia Commons
+  try {
+    const wikimediaUrl = await searchWikimediaCommonsForEvent(eventName);
+    if (wikimediaUrl) {
+      // Save to Firestore
+      saveImageToFirestore('events', eventId, wikimediaUrl);
+      return wikimediaUrl;
+    }
+  } catch (error) {
+    console.log(`Wikimedia search failed for ${eventName}`);
+  }
+  
+  // PRIORITY 4: Try Wikipedia API search with more variations
+  try {
+    // Try different variations of the event name
+    const nameVariations = [
+      eventName,
+      `${eventName} (wrestling)`,
+      `${eventName} wrestling event`,
+      eventName.replace(/\s+/g, '_'),
+      // Try with year if present
+      eventName.replace(/\s+(\d{4})/, ' ($1)'),
+      // Try without year
+      eventName.replace(/\s+\d{4}/, ''),
+    ];
+    
+    for (const nameVar of nameVariations) {
+      try {
+        const apiUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(nameVar)}`;
+        const response = await fetch(apiUrl);
+        if (!response.ok) continue;
+        
+        const data = await response.json();
+        
+        // Check thumbnail first
+        if (data.thumbnail?.source) {
+          const imageUrl = data.thumbnail.source;
+          // Prefer larger images for posters
+          const largerUrl = imageUrl.replace(/\/\d+px-/, '/800px-');
+          saveImageToFirestore('events', eventId, largerUrl);
+          return largerUrl;
+        }
+        
+        // Also check if there's a content_urls with images
+        if (data.content_urls?.desktop?.page) {
+          // Try to get the full page and extract poster image
+          const pageUrl = data.content_urls.desktop.page;
+          // This would require additional parsing, but thumbnail is usually sufficient
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+  } catch (error) {
+    console.log(`Wikipedia API search failed for ${eventName}`);
+  }
+  
+  // PRIORITY 5: Try Wikipedia infobox extraction
+  try {
+    const nameVariations = [
+      eventName,
+      `${eventName} (wrestling)`,
+      eventName.replace(/\s+(\d{4})/, ' ($1)'),
+    ];
+    
+    for (const nameVar of nameVariations) {
+      const infoboxImage = await searchWikipediaInfobox(nameVar);
+      if (infoboxImage) {
+        saveImageToFirestore('events', eventId, infoboxImage);
+        return infoboxImage;
+      }
+    }
+  } catch (error) {
+    // Silently fail
+  }
+  
+  // PRIORITY 6: Try direct Wikipedia Commons file patterns for common events
+  try {
+    const normalizedName = eventName.toLowerCase()
+      .replace(/[^a-z0-9]/g, '_')
+      .replace(/_+/g, '_');
+    
+    const commonPatterns = [
+      `${normalizedName}_poster.jpg`,
+      `${normalizedName}_poster.png`,
+      `Poster_${normalizedName}.jpg`,
+      `Poster_${normalizedName}.png`,
+      `${normalizedName}_banner.jpg`,
+      `${normalizedName}_banner.png`,
+    ];
+    
+    for (const pattern of commonPatterns) {
+      try {
+        const fileUrl = `File:${pattern}`;
+        const apiUrl = `https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&titles=${encodeURIComponent(fileUrl)}&prop=imageinfo&iiprop=url&iiurlwidth=800`;
+        const response = await fetch(apiUrl);
+        const data = await response.json();
+        
+        const pages = data.query?.pages;
+        if (pages) {
+          const pageId = Object.keys(pages)[0];
+          const page = pages[pageId];
+          if (page.imageinfo?.[0]?.thumburl && page.missing === undefined) {
+            const imageUrl = page.imageinfo[0].thumburl;
+            saveImageToFirestore('events', eventId, imageUrl);
+            return imageUrl;
+          }
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+  } catch (error) {
+    // Silently fail
+  }
+  
+  return null;
+};
+
+// Known event posters from reliable sources (Wikipedia Commons, etc.)
+// These are verified working URLs that can be used as fallbacks
+const KNOWN_EVENT_POSTERS = {
+  // Add known event posters here as they're found
+  // Format: 'event-id': 'image-url'
+  // Example: 'wwe-wrestlemania-40': 'https://upload.wikimedia.org/...'
+};
+
+// Helper function to get event poster/banner with fallback
+const getEventImage = async (event) => {
+  if (!event) return null;
+  
+  // If bannerUrl or posterUrl is provided and not from cagematch.net, use it
+  if (event.bannerUrl && !event.bannerUrl.includes('cagematch.net')) {
+    saveImageToFirestore('events', event.id, event.bannerUrl);
+    return event.bannerUrl;
+  }
+  
+  if (event.posterUrl && !event.posterUrl.includes('cagematch.net')) {
+    saveImageToFirestore('events', event.id, event.posterUrl);
+    return event.posterUrl;
+  }
+  
+  // Check known event posters
+  if (KNOWN_EVENT_POSTERS[event.id]) {
+    const knownUrl = KNOWN_EVENT_POSTERS[event.id];
+    saveImageToFirestore('events', event.id, knownUrl);
+    return knownUrl;
+  }
+  
+  // Search for event poster
+  const foundUrl = await searchEventPoster(event.id, event.name);
+  if (foundUrl) {
+    return foundUrl;
+  }
+  
+  // Fallback to placeholder
+  return `https://picsum.photos/seed/${event.id}/800/400`;
 };
 
 // Using reliable image sources - primarily Wikipedia Commons (public domain/CC licensed)
@@ -407,7 +1118,11 @@ const INITIAL_EVENTS = [
 // --- HELPER COMPONENTS ---
 
 const BrandLogo = ({ id, className = "w-full h-full object-contain", logoUrl }) => {
-  // Brand colors for each promotion
+  const [currentLogoUrl, setCurrentLogoUrl] = useState(null);
+  const [imageSource, setImageSource] = useState('initial'); // 'initial', 'wikimedia', 'proxy', 'fallback'
+  const [isLoading, setIsLoading] = useState(true);
+  
+  // Brand colors for each promotion (fallback)
   const brandColors = {
     wwe: { bg: 'bg-gradient-to-br from-red-600 to-red-800', text: 'text-white' },
     aew: { bg: 'bg-gradient-to-br from-yellow-500 to-amber-600', text: 'text-black' },
@@ -423,10 +1138,139 @@ const BrandLogo = ({ id, className = "w-full h-full object-contain", logoUrl }) 
   
   const colors = brandColors[id] || { bg: 'bg-gradient-to-br from-slate-700 to-slate-900', text: 'text-white' };
   
+  useEffect(() => {
+    // Reset state when id or logoUrl changes
+    setIsLoading(true);
+    setImageSource('initial');
+    
+    // Priority order:
+    // 1. Provided logoUrl (if not from cagematch.net)
+    // 2. Local image files (user-provided in public/images/promotions/)
+    // 3. Firestore database (cached images)
+    // 4. Hardcoded PROMOTION_LOGOS
+    // 5. Search multiple sources (Wikimedia, Wikipedia API)
+    // 6. Use proxy services
+    // 7. Fallback to colored gradient with text
+    
+    const loadLogo = async () => {
+      // Step 1: Check provided logoUrl (skip cagematch.net)
+      if (logoUrl && !logoUrl.includes('cagematch.net')) {
+        setCurrentLogoUrl(logoUrl);
+        setImageSource('initial');
+        // Save to Firestore for future use
+        saveImageToFirestore('promotions', id, logoUrl);
+        return;
+      }
+      
+      // Step 2: Check for local image files (user-provided)
+      // Files should be in: public/images/promotions/{id}.{ext}
+      // Check PNG first since that's what most users provide, then SVG, then others
+      const extensions = ['png', 'svg', 'jpg', 'jpeg', 'webp'];
+      for (const ext of extensions) {
+        const localPath = `/images/promotions/${id.toLowerCase()}.${ext}`;
+        const localImage = await checkLocalImage(localPath);
+        if (localImage) {
+          setCurrentLogoUrl(localImage);
+          setImageSource('local');
+          // Save local path to Firestore for future use
+          saveImageToFirestore('promotions', id, localImage);
+          return;
+        }
+      }
+      
+      // Step 3: Check Firestore database
+      try {
+        const firestoreUrl = await getImageFromFirestore('promotions', id);
+        if (firestoreUrl) {
+          setCurrentLogoUrl(firestoreUrl);
+          setImageSource('database');
+          return;
+        }
+      } catch (error) {
+        console.log(`Firestore lookup failed for ${id}`);
+      }
+      
+      // Step 3: Check hardcoded PROMOTION_LOGOS
+      if (PROMOTION_LOGOS[id]) {
+        const url = PROMOTION_LOGOS[id];
+        setCurrentLogoUrl(url);
+        setImageSource('initial');
+        // Save to Firestore for future use
+        saveImageToFirestore('promotions', id, url);
+        return;
+      }
+      
+      // Step 4: Search multiple sources
+      try {
+        // Get promotion name from PROMOTIONS array or use id
+        const promo = PROMOTIONS.find(p => p.id === id);
+        const promotionName = promo?.name || id;
+        const foundUrl = await searchPromotionLogo(id, promotionName);
+        if (foundUrl) {
+          setCurrentLogoUrl(foundUrl);
+          setImageSource('database');
+          return;
+        }
+      } catch (error) {
+        console.log(`Logo search failed for ${id}`);
+      }
+      
+      // Step 5: No logo found - will use fallback
+      setCurrentLogoUrl(null);
+      setImageSource('fallback');
+    };
+    
+    loadLogo();
+  }, [id, logoUrl]);
+  
+  // Try alternative proxy if current one fails
+  const handleImageError = () => {
+    if (imageSource === 'initial' && currentLogoUrl) {
+      // Try with proxy
+      const proxied = getProxiedImageUrl(currentLogoUrl, 200, 200, 'wsrv');
+      setCurrentLogoUrl(proxied);
+      setImageSource('proxy');
+    } else if (imageSource === 'proxy' && currentLogoUrl) {
+      // Try alternative proxy
+      const originalUrl = logoUrl && !logoUrl.includes('cagematch.net') 
+        ? logoUrl 
+        : (PROMOTION_LOGOS[id] || logoUrl);
+      if (originalUrl) {
+        const proxied = getProxiedImageUrl(originalUrl, 200, 200, 'images');
+        setCurrentLogoUrl(proxied);
+      } else {
+        setImageSource('fallback');
+      }
+    } else if (imageSource === 'wikimedia' && currentLogoUrl) {
+      // Try proxying the Wikimedia image
+      const proxied = getProxiedImageUrl(currentLogoUrl, 200, 200, 'wsrv');
+      setCurrentLogoUrl(proxied);
+      setImageSource('proxy');
+    } else {
+      setImageSource('fallback');
+    }
+  };
+  
+  // Fallback - colored gradient with text
+  if (!currentLogoUrl || imageSource === 'fallback') {
+    return (
+      <div className={`w-full h-full flex items-center justify-center ${colors.bg} ${colors.text} font-black text-xs uppercase rounded tracking-tight shadow-inner ${className}`}>
+        {id.toUpperCase()}
+      </div>
+    );
+  }
+  
   return (
-    <div className={`w-full h-full flex items-center justify-center ${colors.bg} ${colors.text} font-black text-xs uppercase rounded tracking-tight shadow-inner`}>
-      {id.toUpperCase()}
-    </div>
+    <img 
+      src={currentLogoUrl} 
+      alt={`${id} logo`} 
+      className={`object-contain ${className}`} 
+      onError={handleImageError}
+      onLoad={() => setIsLoading(false)}
+      referrerPolicy="no-referrer" 
+      crossOrigin="anonymous"
+      loading="lazy" 
+    />
   );
 };
 
@@ -442,44 +1286,54 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
     
     // Priority order:
     // 1. Provided imageUrl (if not from cagematch.net)
-    // 2. Hardcoded WRESTLER_IMAGES
-    // 3. Try Wikimedia Commons API search
-    // 4. Use proxy services
-    // 5. Fallback to initials
+    // 2. Firestore database (cached images)
+    // 3. Hardcoded WRESTLER_IMAGES
+    // 4. Search multiple sources (Wikimedia, Wikipedia API)
+    // 5. Use proxy services
+    // 6. Fallback to initials
     
     const loadImage = async () => {
       // Step 1: Check provided imageUrl (skip cagematch.net)
       if (imageUrl && !imageUrl.includes('cagematch.net')) {
         setCurrentImageUrl(imageUrl);
         setImageSource('initial');
+        // Save to Firestore for future use
+        saveImageToFirestore('wrestlers', name, imageUrl);
         return;
       }
       
-      // Step 2: Check hardcoded WRESTLER_IMAGES
-      if (WRESTLER_IMAGES[name]) {
-        setCurrentImageUrl(WRESTLER_IMAGES[name]);
-        setImageSource('initial');
-        return;
-      }
-      
-      // Step 3: Try Wikimedia Commons API search
+      // Step 2: Check Firestore database
       try {
-        const wikimediaUrl = await searchWikimediaCommons(name);
-        if (wikimediaUrl) {
-          setCurrentImageUrl(wikimediaUrl);
-          setImageSource('wikimedia');
+        const firestoreUrl = await getImageFromFirestore('wrestlers', name);
+        if (firestoreUrl) {
+          setCurrentImageUrl(firestoreUrl);
+          setImageSource('database');
           return;
         }
       } catch (error) {
-        console.log(`Wikimedia search failed for ${name}`);
+        console.log(`Firestore lookup failed for ${name}`);
       }
       
-      // Step 4: If we have a hardcoded URL, use it directly (Wikipedia URLs work well)
-      const hardcodedUrl = WRESTLER_IMAGES[name];
-      if (hardcodedUrl) {
-        setCurrentImageUrl(hardcodedUrl);
+      // Step 3: Check hardcoded WRESTLER_IMAGES
+      if (WRESTLER_IMAGES[name]) {
+        const url = WRESTLER_IMAGES[name];
+        setCurrentImageUrl(url);
         setImageSource('initial');
+        // Save to Firestore for future use
+        saveImageToFirestore('wrestlers', name, url);
         return;
+      }
+      
+      // Step 4: Search multiple sources
+      try {
+        const foundUrl = await searchWrestlerImage(name);
+        if (foundUrl) {
+          setCurrentImageUrl(foundUrl);
+          setImageSource('database');
+          return;
+        }
+      } catch (error) {
+        console.log(`Image search failed for ${name}`);
       }
       
       // Step 5: No image found - will use fallback
@@ -570,6 +1424,56 @@ const Toggle = ({ enabled, onClick }) => (
     <div className={`bg-white w-4 h-4 rounded-full shadow-md transform duration-200 ${enabled ? 'translate-x-6' : 'translate-x-0'}`} />
   </div>
 );
+
+// Event Banner/Poster Component - handles loading event images with fallbacks
+const EventBanner = ({ event, className = "w-full h-full object-cover", fallbackClassName }) => {
+  const [currentImageUrl, setCurrentImageUrl] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
+  
+  useEffect(() => {
+    if (!event) return;
+    
+    setIsLoading(true);
+    setHasError(false);
+    
+    const loadEventImage = async () => {
+      try {
+        const imageUrl = await getEventImage(event);
+        setCurrentImageUrl(imageUrl);
+      } catch (error) {
+        console.log(`Failed to load event image for ${event.name}:`, error);
+        setHasError(true);
+        setCurrentImageUrl(`https://picsum.photos/seed/${event.id}/800/400`);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadEventImage();
+  }, [event?.id, event?.name, event?.bannerUrl, event?.posterUrl]);
+  
+  const handleImageError = () => {
+    setHasError(true);
+    // Fallback to placeholder
+    setCurrentImageUrl(`https://picsum.photos/seed/${event?.id}/800/400`);
+  };
+  
+  if (!event) return null;
+  
+  return (
+    <img 
+      src={currentImageUrl || `https://picsum.photos/seed/${event.id}/800/400`}
+      alt={`${event.name} poster`}
+      className={className}
+      onError={handleImageError}
+      onLoad={() => setIsLoading(false)}
+      referrerPolicy="no-referrer"
+      crossOrigin="anonymous"
+      loading="lazy"
+    />
+  );
+};
 
 // --- MAIN APPLICATION ---
 
@@ -867,6 +1771,8 @@ export default function RingsidePickemFinal() {
     if (selectedEvent?.id && viewState === 'dashboard') {
       calculateCommunitySentiment(selectedEvent.id);
     }
+    // Note: calculateCommunitySentiment is not in deps as it's stable and uses current state
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedEvent?.id, viewState]);
 
   // --- HANDLERS ---
@@ -1222,6 +2128,9 @@ export default function RingsidePickemFinal() {
       return;
     }
     
+    // FIXED: Normalize matchId to string for consistency
+    const normalizedMatchId = matchId.toString();
+    
     // CRITICAL: Multiple validation checks to prevent saving predictions for wrong user
     // 1. Check predictionsUserId matches current user
     if (predictionsUserId !== null && predictionsUserId !== user.uid) {
@@ -1250,7 +2159,7 @@ export default function RingsidePickemFinal() {
     const currentPreds = predictions[eventId] || {};
     const newPreds = { 
       ...currentPreds, 
-      [matchId]: method ? { winner, method } : winner
+      [normalizedMatchId]: method ? { winner, method } : winner
     };
     setPredictions(prev => ({ ...prev, [eventId]: newPreds }));
     
@@ -1264,7 +2173,7 @@ export default function RingsidePickemFinal() {
           const reverted = { ...prev };
           if (reverted[eventId]) {
             const eventPreds = { ...reverted[eventId] };
-            delete eventPreds[matchId];
+            delete eventPreds[normalizedMatchId];
             reverted[eventId] = eventPreds;
           }
           return reverted;
@@ -1376,7 +2285,11 @@ export default function RingsidePickemFinal() {
 
   const simulateEventResult = (event) => {
     const results = {};
-    event.matches.forEach(m => { results[m.id] = Math.random() > 0.5 ? m.p1 : m.p2; });
+    // FIXED: Ensure consistent string keys for match IDs
+    event.matches.forEach(m => { 
+      const matchId = m.id.toString();
+      results[matchId] = Math.random() > 0.5 ? m.p1 : m.p2; 
+    });
     setEventResults(prev => ({ ...prev, [event.id]: results }));
     
     if(user) {
@@ -1386,10 +2299,12 @@ export default function RingsidePickemFinal() {
       let correctCount = 0;
       const myPreds = predictions[event.id] || {};
       event.matches.forEach(m => { 
-        const pred = myPreds[m.id];
+        // FIXED: Use string key consistently
+        const matchId = m.id.toString();
+        const pred = myPreds[matchId];
         // Handle both old format (string) and new format (object)
         const predictedWinner = typeof pred === 'string' ? pred : (pred?.winner || pred);
-        if (predictedWinner === results[m.id]) correctCount++; 
+        if (predictedWinner === results[matchId]) correctCount++; 
       });
       
       setUserProfile(prev => ({
@@ -1950,12 +2865,10 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
             ) : (
               myEvents.map(event => {
                 const promo = PROMOTIONS.find(p => p.id === event.promoId);
-                // Use scraped bannerUrl/posterUrl if available, otherwise fall back to default
-                const bgImage = event.bannerUrl || event.posterUrl || `https://picsum.photos/seed/${event.id}/800/400`;
                 const isGraded = eventResults[event.id];
                 return (
                   <div key={event.id} onClick={() => { setSelectedEvent(event); setActiveTab('event'); }} className="group relative bg-slate-900 hover:bg-slate-800 border border-slate-800 transition-all cursor-pointer rounded-2xl overflow-hidden shadow-xl" style={{ height: '200px' }}>
-                    <div className="absolute inset-0"><img src={bgImage} alt="poster" className="w-full h-full object-cover opacity-60 group-hover:opacity-40 transition-opacity duration-500 group-hover:scale-105" referrerPolicy="no-referrer" onError={(e) => { e.target.style.display = 'none'; }} /><div className="absolute inset-0 bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950"></div></div>
+                    <div className="absolute inset-0"><EventBanner event={event} className="w-full h-full object-cover opacity-60 group-hover:opacity-40 transition-opacity duration-500 group-hover:scale-105" /><div className="absolute inset-0 bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950"></div></div>
                     <div className="absolute inset-0 p-5 flex flex-col justify-end">
                       <div className="flex justify-between items-end">
                         <div className="flex-1">
@@ -2022,7 +2935,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
           <div className="pb-24 animate-slideUp">
             <button onClick={() => setActiveTab('home')} className="mb-4 text-slate-500 hover:text-white flex items-center gap-1 text-xs font-bold uppercase tracking-wider">← Feed</button>
             <div className="mb-6 relative h-48 rounded-2xl overflow-hidden shadow-2xl border border-slate-800">
-              <img src={selectedEvent.bannerUrl || selectedEvent.posterUrl || `https://picsum.photos/seed/${selectedEvent.id}/800/400`} className="w-full h-full object-cover opacity-50" referrerPolicy="no-referrer" onError={(e) => { e.target.style.display = 'none'; }} />
+              <EventBanner event={selectedEvent} className="w-full h-full object-cover opacity-50" />
               <div className="absolute inset-0 bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950 -z-10"></div>
               <div className="absolute inset-0 bg-gradient-to-t from-slate-950 to-transparent"></div>
               <div className="absolute bottom-0 left-0 p-6 w-full text-center"><div className="inline-block w-16 h-16 p-2 bg-slate-950/50 backdrop-blur-md rounded-xl border border-slate-700 mb-2 shadow-lg"><BrandLogo id={selectedEvent.promoId} /></div><h1 className="text-3xl font-black italic uppercase text-white shadow-black drop-shadow-lg">{selectedEvent.name}</h1></div>
@@ -2039,14 +2952,17 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                   currentUserIdRef.current === user?.uid; // Extra check using ref
                 
                 // Only use predictions if they belong to current user
-                const myPickData = predictionsBelongToCurrentUser ? (predictions[selectedEvent.id]?.[match.id]) : undefined;
+                // FIXED: Use string key consistently
+                const matchIdStr = match.id.toString();
+                const myPickData = predictionsBelongToCurrentUser ? (predictions[selectedEvent.id]?.[matchIdStr]) : undefined;
                 // Handle both old format (string) and new format (object)
                 const myPick = myPickData ? (typeof myPickData === 'string' ? myPickData : (myPickData?.winner || myPickData)) : undefined;
                 const myMethod = myPickData && typeof myPickData === 'object' ? myPickData?.method : null;
-                const actualWinner = eventResults[selectedEvent.id]?.[match.id];
+                // FIXED: Use string key consistently
+                const actualWinner = eventResults[selectedEvent.id]?.[matchIdStr];
                 const isCorrect = actualWinner && myPick === actualWinner;
-                const sentiment = communitySentiment[selectedEvent.id]?.[match.id];
-                const matchKey = `${selectedEvent.id}-${match.id}`;
+                const sentiment = communitySentiment[selectedEvent.id]?.[matchIdStr];
+                const matchKey = `${selectedEvent.id}-${matchIdStr}`;
                 
                 return (
                   <div key={match.id} className="relative group">
