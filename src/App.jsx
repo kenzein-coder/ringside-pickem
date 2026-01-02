@@ -400,6 +400,10 @@ const getImageFromStorage = async (type, identifier) => {
         const downloadURL = await getDownloadURL(storageRef);
         return downloadURL;
       } catch (e) {
+        // Check if it's a CORS error - if so, return null immediately to avoid blocking
+        if (e.message?.includes('CORS') || e.code === 'storage/unauthorized') {
+          return null;
+        }
         // Try next extension
         continue;
       }
@@ -412,11 +416,19 @@ const getImageFromStorage = async (type, identifier) => {
       const downloadURL = await getDownloadURL(storageRef);
       return downloadURL;
     } catch (e) {
+      // Check if it's a CORS error
+      if (e.message?.includes('CORS') || e.code === 'storage/unauthorized') {
+        return null;
+      }
       // Image doesn't exist in Storage
       return null;
     }
   } catch (error) {
-    // Image doesn't exist in Storage
+    // Check if it's a CORS error
+    if (error.message?.includes('CORS') || error.code === 'storage/unauthorized') {
+      return null;
+    }
+    // Image doesn't exist in Storage or other error
     return null;
   }
 };
@@ -1489,25 +1501,13 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
       // But check again in case name changed
       const hardcodedUrl = getHardcodedImage(name);
       if (hardcodedUrl) {
-        // First check if we have it in Storage (this works for both Wikimedia and non-Wikimedia images)
-        try {
-          const storageUrl = await getImageFromStorage('wrestlers', name);
-          if (storageUrl) {
-            setCurrentImageUrl(storageUrl);
-            setImageSource('database');
-            return;
-          }
-        } catch (e) {
-          // Not in Storage, continue
-        }
-        
-        // If not in Storage, use hardcoded URL
-        // For Wikimedia URLs, we'll use them directly (they're reliable) and download to Storage in background
+        // Use hardcoded URL immediately (don't wait for Storage check)
+        // For Wikimedia URLs, use them directly (they're reliable and public domain)
         // For other URLs, proxy if needed
         let urlToUse = hardcodedUrl;
         let sourceType = 'initial';
         
-        // If it's a Wikimedia URL, use it directly (they're reliable and public domain)
+        // If it's a Wikimedia URL, use it directly
         // Otherwise, proxy external URLs
         if (!hardcodedUrl.includes('wikimedia.org') && !hardcodedUrl.includes('wikipedia.org')) {
           if (hardcodedUrl.startsWith('http://') || hardcodedUrl.startsWith('https://')) {
@@ -1518,6 +1518,17 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
         
         setCurrentImageUrl(urlToUse);
         setImageSource(sourceType);
+        
+        // Check Storage in the background (non-blocking) - if it exists, switch to it
+        // This avoids CORS errors blocking the image load
+        getImageFromStorage('wrestlers', name).then((storageUrl) => {
+          if (storageUrl) {
+            setCurrentImageUrl(storageUrl);
+            setImageSource('database');
+          }
+        }).catch(() => {
+          // Storage check failed (CORS or doesn't exist) - that's OK, we're using hardcoded URL
+        });
         
         // Download and upload to Storage in the background (non-blocking)
         // This works for both Wikimedia and non-Wikimedia images
@@ -1709,7 +1720,36 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
       console.log(`🖼️ Image error for "${name}", source: ${imageSource}, retry: ${retryCountRef.current}/${maxRetries}`);
     }
     
-    // Strategy 1: Try alternative proxy if current one failed (but skip Wikimedia URLs)
+    // Strategy 1: If Wikimedia URL failed, try alternative sources immediately
+    if ((imageSource === 'initial' || imageSource === 'database') && currentImageUrl) {
+      const isWikimedia = currentImageUrl.includes('wikimedia.org') || currentImageUrl.includes('wikipedia.org');
+      if (isWikimedia && retryCountRef.current === 1) {
+        // Wikimedia URL failed - try searching for alternative sources
+        searchWrestlerImage(name).then((foundUrl) => {
+          if (foundUrl && !foundUrl.includes('wikimedia.org') && !foundUrl.includes('wikipedia.org') && foundUrl !== currentImageUrl) {
+            let urlToUse = foundUrl;
+            let sourceType = 'database';
+            if (foundUrl.startsWith('http://') || foundUrl.startsWith('https://')) {
+              urlToUse = getProxiedImageUrl(foundUrl, 400, 500, 'wsrv');
+              sourceType = 'proxy';
+            }
+            setCurrentImageUrl(urlToUse);
+            setImageSource(sourceType);
+            retryCountRef.current = 0; // Reset on success
+            return;
+          } else {
+            // No alternative found, fall back to initials
+            setImageSource('fallback');
+          }
+        }).catch(() => {
+          // Search failed, fall back to initials
+          setImageSource('fallback');
+        });
+        return;
+      }
+    }
+    
+    // Strategy 2: Try alternative proxy if current one failed (but skip Wikimedia URLs)
     if (imageSource === 'proxy' && currentImageUrl) {
       // Try alternative proxy service
       let originalUrl = currentImageUrl.includes('wsrv.nl') || currentImageUrl.includes('weserv.nl')
@@ -1729,15 +1769,37 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
           return;
         }
       } else {
-        // If it's a Wikimedia URL, skip to fallback immediately
+        // If it's a Wikimedia URL, try alternative sources
         if (originalUrl && (originalUrl.includes('wikimedia.org') || originalUrl.includes('wikipedia.org'))) {
-          setImageSource('fallback');
-          return;
+          if (retryCountRef.current === 1) {
+            searchWrestlerImage(name).then((foundUrl) => {
+              if (foundUrl && !foundUrl.includes('wikimedia.org') && !foundUrl.includes('wikipedia.org') && foundUrl !== currentImageUrl) {
+                let urlToUse = foundUrl;
+                let sourceType = 'database';
+                if (foundUrl.startsWith('http://') || foundUrl.startsWith('https://')) {
+                  urlToUse = getProxiedImageUrl(foundUrl, 400, 500, 'wsrv');
+                  sourceType = 'proxy';
+                }
+                setCurrentImageUrl(urlToUse);
+                setImageSource(sourceType);
+                retryCountRef.current = 0;
+                return;
+              } else {
+                setImageSource('fallback');
+              }
+            }).catch(() => {
+              setImageSource('fallback');
+            });
+            return;
+          } else {
+            setImageSource('fallback');
+            return;
+          }
         }
       }
     }
     
-    // Strategy 2: Try Storage again (might have been uploaded in background)
+    // Strategy 3: Try Storage again (might have been uploaded in background)
     if (imageSource !== 'database') {
       getImageFromStorage('wrestlers', name).then((storageUrl) => {
         if (storageUrl && storageUrl !== currentImageUrl) {
@@ -1751,7 +1813,7 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
       });
     }
     
-    // Strategy 3: Try Firestore again (might have been updated)
+    // Strategy 4: Try Firestore again (might have been updated)
     if (imageSource !== 'database') {
       getImageFromFirestore('wrestlers', name).then((firestoreUrl) => {
         if (firestoreUrl && !firestoreUrl.includes('cagematch.net') && firestoreUrl !== currentImageUrl) {
@@ -1765,7 +1827,7 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
       });
     }
     
-    // Strategy 4: Try searching again (might find new source)
+    // Strategy 5: Try searching again (might find new source)
     if (retryCountRef.current === 2) {
       searchWrestlerImage(name).then((foundUrl) => {
         if (foundUrl && foundUrl !== currentImageUrl) {
@@ -1779,7 +1841,7 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
       });
     }
     
-    // Strategy 5: If all else fails, use fallback
+    // Strategy 6: If all else fails, use fallback
     if (retryCountRef.current >= maxRetries) {
       setImageSource('fallback');
     }
