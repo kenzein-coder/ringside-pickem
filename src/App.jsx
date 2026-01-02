@@ -467,11 +467,31 @@ const getImageFromFirestore = async (type, identifier) => {
 // Helper function to check if a local image exists
 // In Vite, files in /public are served at the root URL
 // Cache for failed local image checks to avoid repeated 404s
-const failedLocalImageCache = new Set();
+// Use localStorage to persist across page reloads
+const getFailedImageCache = () => {
+  try {
+    const cached = localStorage.getItem('failedLocalImages');
+    return cached ? new Set(JSON.parse(cached)) : new Set();
+  } catch {
+    return new Set();
+  }
+};
+
+const saveFailedImageCache = (cache) => {
+  try {
+    // Only store last 1000 failed paths to avoid localStorage bloat
+    const arr = Array.from(cache).slice(-1000);
+    localStorage.setItem('failedLocalImages', JSON.stringify(arr));
+  } catch {
+    // Ignore localStorage errors
+  }
+};
 
 const checkLocalImage = async (path) => {
+  const failedCache = getFailedImageCache();
+  
   // Skip if we've already checked this path and it failed
-  if (failedLocalImageCache.has(path)) {
+  if (failedCache.has(path)) {
     return null;
   }
   
@@ -490,10 +510,12 @@ const checkLocalImage = async (path) => {
       }
     }
     // If not found, cache the failure
-    failedLocalImageCache.add(path);
+    failedCache.add(path);
+    saveFailedImageCache(failedCache);
   } catch (error) {
     // Image doesn't exist locally or failed to load - cache the failure
-    failedLocalImageCache.add(path);
+    failedCache.add(path);
+    saveFailedImageCache(failedCache);
   }
   return null;
 };
