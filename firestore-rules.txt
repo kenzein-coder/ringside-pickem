@@ -11,6 +11,11 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
     
+    // Allow authenticated users to read/write their locked events
+    match /artifacts/{appId}/users/{userId}/lockedEvents/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
     // Allow public read access to promotions, events, and matches
     // Allow write access for automated scrapers
     match /artifacts/{appId}/public/data/promotions/{promoId} {
