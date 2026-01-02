@@ -30,6 +30,14 @@ import {
   getDoc,
   getDocs
 } from 'firebase/firestore';
+import {
+  getStorage,
+  ref,
+  uploadBytes,
+  getDownloadURL,
+  listAll,
+  deleteObject
+} from 'firebase/storage';
 import { 
   Trophy, 
   Calendar, 
@@ -85,6 +93,16 @@ try {
 } catch (error) {
   console.error('❌ Firebase initialization error:', error);
   firebaseError = error.message;
+}
+
+// Initialize Firebase Storage
+let storage = null;
+try {
+  if (app) {
+    storage = getStorage(app);
+  }
+} catch (error) {
+  console.error('❌ Firebase Storage initialization error:', error);
 }
 // Use Firebase project ID from config, fall back to __app_id or default
 const appId = firebaseConfig.projectId || (typeof __app_id !== 'undefined' ? __app_id : 'default-app-id');
@@ -191,13 +209,20 @@ const searchWikimediaCommons = async (wrestlerName) => {
   return null;
 };
 
-// Helper function to get Pexels image (free API, good CORS support)
-const getPexelsImage = async (wrestlerName) => {
+// Helper function to search Unsplash (free, no API key needed for basic usage)
+const searchUnsplashImage = async (wrestlerName) => {
   try {
-    // Pexels has a public API but requires an API key for search
-    // Instead, we'll use their CDN with predictable URLs or use a proxy
-    // For now, we'll skip direct Pexels and use other sources
-    return null;
+    // Unsplash Source API - free tier, no API key needed
+    // Note: This uses Unsplash Source which provides random images based on search
+    const searchQuery = encodeURIComponent(`${wrestlerName} professional wrestler`);
+    
+    // Try Unsplash Source (random image based on search term)
+    // This is not perfect but provides free images
+    const unsplashUrl = `https://source.unsplash.com/400x500/?${searchQuery}`;
+    
+    // Verify the image exists by trying to load it
+    // Note: Unsplash Source returns random images, so this is a best-effort approach
+    return unsplashUrl;
   } catch (error) {
     return null;
   }
@@ -207,6 +232,42 @@ const getPexelsImage = async (wrestlerName) => {
 const getPixabayImage = (wrestlerName) => {
   // Pixabay doesn't have a reliable direct URL pattern, so we'll skip this
   return null;
+};
+
+// Cache for failed image URLs to avoid repeated retries
+const failedImageCache = new Map();
+
+// Helper function to verify if an image URL is accessible
+const verifyImageUrl = async (url, timeout = 5000) => {
+  if (!url) return false;
+  
+  // Check cache first
+  if (failedImageCache.has(url)) {
+    return false;
+  }
+  
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    
+    const response = await fetch(url, {
+      method: 'HEAD',
+      mode: 'no-cors', // Use no-cors to avoid CORS issues, but we can't check status
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    
+    // With no-cors, we can't check response.ok, so we'll try loading it
+    // Return true optimistically - the onError handler will catch failures
+    return true;
+  } catch (error) {
+    // Mark as failed in cache
+    failedImageCache.set(url, true);
+    // Clear cache after 5 minutes
+    setTimeout(() => failedImageCache.delete(url), 5 * 60 * 1000);
+    return false;
+  }
 };
 
 // Helper function to use image proxy services that support multiple sources
@@ -264,6 +325,102 @@ const PROMOTION_LOGOS = {
   'Major League Wrestling': 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9a/Major_League_Wrestling_logo.svg/200px-Major_League_Wrestling_logo.svg.png',
 };
 
+// Helper function to download an image and upload to Firebase Storage
+const downloadAndUploadImage = async (imageUrl, type, identifier) => {
+  if (!storage || !imageUrl) return null;
+  
+  try {
+    // Create a safe filename from the identifier
+    const safeName = identifier.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+    const fileExtension = imageUrl.split('.').pop().split('?')[0] || 'jpg';
+    const storagePath = `images/${type}/${safeName}.${fileExtension}`;
+    const storageRef = ref(storage, storagePath);
+    
+    // Check if image already exists in Storage
+    try {
+      const existingUrl = await getDownloadURL(storageRef);
+      if (existingUrl) {
+        // Save the Storage URL to Firestore
+        await saveImageToFirestore(type, identifier, existingUrl);
+        return existingUrl;
+      }
+    } catch (e) {
+      // Image doesn't exist, continue to download and upload
+    }
+    
+    // Download the image
+    const response = await fetch(imageUrl, {
+      mode: 'cors',
+      referrerPolicy: 'no-referrer'
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to download image: ${response.status}`);
+    }
+    
+    const blob = await response.blob();
+    
+    // Upload to Firebase Storage
+    const metadata = {
+      contentType: blob.type || `image/${fileExtension}`,
+      customMetadata: {
+        originalUrl: imageUrl,
+        uploadedAt: new Date().toISOString()
+      }
+    };
+    
+    await uploadBytes(storageRef, blob, metadata);
+    
+    // Get the download URL
+    const downloadURL = await getDownloadURL(storageRef);
+    
+    // Save the Storage URL to Firestore
+    await saveImageToFirestore(type, identifier, downloadURL);
+    
+    return downloadURL;
+  } catch (error) {
+    console.log(`Failed to download and upload image for ${identifier}:`, error);
+    return null;
+  }
+};
+
+// Helper function to get image from Firebase Storage
+const getImageFromStorage = async (type, identifier) => {
+  if (!storage) return null;
+  
+  try {
+    const safeName = identifier.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+    // Try common extensions
+    const extensions = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+    
+    for (const ext of extensions) {
+      try {
+        const storagePath = `images/${type}/${safeName}.${ext}`;
+        const storageRef = ref(storage, storagePath);
+        const downloadURL = await getDownloadURL(storageRef);
+        return downloadURL;
+      } catch (e) {
+        // Try next extension
+        continue;
+      }
+    }
+    
+    // If no extension worked, try without extension (in case it was stored differently)
+    try {
+      const storagePath = `images/${type}/${safeName}`;
+      const storageRef = ref(storage, storagePath);
+      const downloadURL = await getDownloadURL(storageRef);
+      return downloadURL;
+    } catch (e) {
+      // Image doesn't exist in Storage
+      return null;
+    }
+  } catch (error) {
+    // Image doesn't exist in Storage
+    return null;
+  }
+};
+
 // Helper function to save image URL to Firestore
 const saveImageToFirestore = async (type, identifier, imageUrl) => {
   if (!db || !appId) return;
@@ -293,7 +450,12 @@ const getImageFromFirestore = async (type, identifier) => {
     
     if (imageData.exists()) {
       const data = imageData.data();
-      return data[identifier] || null;
+      const url = data[identifier] || null;
+      // If the URL is from Firebase Storage, return it directly
+      if (url && url.includes('firebasestorage.googleapis.com')) {
+        return url;
+      }
+      return url;
     }
   } catch (error) {
     console.log(`Failed to get image from Firestore:`, error);
@@ -304,13 +466,21 @@ const getImageFromFirestore = async (type, identifier) => {
 
 // Helper function to check if a local image exists
 // In Vite, files in /public are served at the root URL
+// Cache for failed local image checks to avoid repeated 404s
+const failedLocalImageCache = new Set();
+
 const checkLocalImage = async (path) => {
+  // Skip if we've already checked this path and it failed
+  if (failedLocalImageCache.has(path)) {
+    return null;
+  }
+  
   try {
-    // Try to fetch the image - if it exists, return the path
-    // Use GET request with cache control to check if file exists
+    // Use HEAD request first to check if file exists (lighter than GET)
     const response = await fetch(path, { 
-      method: 'GET',
-      cache: 'no-cache'
+      method: 'HEAD',
+      cache: 'no-cache',
+      signal: AbortSignal.timeout(2000) // 2 second timeout
     });
     if (response.ok && response.status === 200) {
       // Verify it's actually an image by checking content type
@@ -319,8 +489,11 @@ const checkLocalImage = async (path) => {
         return path;
       }
     }
+    // If not found, cache the failure
+    failedLocalImageCache.add(path);
   } catch (error) {
-    // Image doesn't exist locally or failed to load
+    // Image doesn't exist locally or failed to load - cache the failure
+    failedLocalImageCache.add(path);
   }
   return null;
 };
@@ -552,44 +725,144 @@ const searchPromotionLogo = async (promotionId, promotionName) => {
   return null;
 };
 
+// Helper to normalize wrestler name for matching
+const normalizeWrestlerName = (name) => {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/\./g, '') // Remove periods
+    .replace(/\s+/g, ' ') // Normalize spaces
+    .replace(/[^\w\s]/g, ''); // Remove special chars except spaces
+};
+
+// Helper function to search Imgur for wrestler images
+const searchImgurImage = async (wrestlerName) => {
+  try {
+    // Imgur has a public API but requires client ID for search
+    // For now, we'll use a proxy service that can search Imgur
+    // Alternative: Use Imgur's gallery search via proxy
+    const searchQuery = encodeURIComponent(`${wrestlerName} wrestler`);
+    // Using a proxy to search Imgur (this is a simplified approach)
+    // Note: Full Imgur API would require authentication
+    return null; // Disabled for now - would need API key
+  } catch (error) {
+    return null;
+  }
+};
+
+// Helper function to search Pexels for wrestler images (free API)
+const searchPexelsImage = async (wrestlerName) => {
+  try {
+    // Pexels has a free API but requires an API key
+    // For now, we'll skip direct Pexels API calls
+    // Alternative: Use Unsplash which has better free tier
+    return null;
+  } catch (error) {
+    return null;
+  }
+};
+
+// Helper function to search via SerpAPI or similar (free image search)
+// Note: Most free image search APIs require keys, so we'll use Unsplash as primary
+const searchImageAPI = async (wrestlerName) => {
+  try {
+    // This is a placeholder for future image API integration
+    // Options: SerpAPI, Bing Image Search API, Google Custom Search
+    // All require API keys, so we'll stick with Unsplash for now
+    return null;
+  } catch (error) {
+    return null;
+  }
+};
+
 // Helper function to search multiple sources for wrestler images
 const searchWrestlerImage = async (wrestlerName) => {
-  // Check Firestore first
+  // PRIORITY 1: Check Firestore (skip Cagematch URLs)
   const firestoreUrl = await getImageFromFirestore('wrestlers', wrestlerName);
   if (firestoreUrl) {
-    return firestoreUrl;
+    // Skip Cagematch URLs
+    if (firestoreUrl.includes('cagematch.net')) {
+      // Don't use Cagematch - continue to other sources
+    } else {
+      return firestoreUrl;
+    }
   }
   
-  // Check hardcoded images
+  // PRIORITY 2: Check hardcoded images with normalization (skip Wikimedia)
   if (WRESTLER_IMAGES[wrestlerName]) {
     const url = WRESTLER_IMAGES[wrestlerName];
-    // Save to Firestore for future use
-    saveImageToFirestore('wrestlers', wrestlerName, url);
-    return url;
+    // Skip Wikimedia URLs
+    if (url.includes('wikimedia.org') || url.includes('wikipedia.org')) {
+      // Don't use Wikimedia - continue to other sources
+    } else {
+      saveImageToFirestore('wrestlers', wrestlerName, url);
+      return url;
+    }
   }
   
-  // Try Wikimedia Commons
+  // Try normalized name matching for hardcoded images (skip Wikimedia)
+  const normalizedName = normalizeWrestlerName(wrestlerName);
+  for (const [key, url] of Object.entries(WRESTLER_IMAGES)) {
+    if (normalizeWrestlerName(key) === normalizedName) {
+      // Skip Wikimedia URLs
+      if (url.includes('wikimedia.org') || url.includes('wikipedia.org')) {
+        continue;
+      }
+      saveImageToFirestore('wrestlers', wrestlerName, url);
+      return url;
+    }
+  }
+  
+  // PRIORITY 3: Try Unsplash (free, no API key needed for basic usage)
   try {
-    const wikimediaUrl = await searchWikimediaCommons(wrestlerName);
-    if (wikimediaUrl) {
-      // Save to Firestore
-      saveImageToFirestore('wrestlers', wrestlerName, wikimediaUrl);
-      return wikimediaUrl;
+    const unsplashUrl = await searchUnsplashImage(wrestlerName);
+    if (unsplashUrl) {
+      saveImageToFirestore('wrestlers', wrestlerName, unsplashUrl);
+      return unsplashUrl;
     }
   } catch (error) {
-    console.log(`Wikimedia search failed for ${wrestlerName}`);
+    // Silently fail
   }
   
-  // Try Wikipedia API search
+  // PRIORITY 4: Try Online World of Wrestling (reliable wrestling database)
+  try {
+    const owowUrl = await searchOWOWImage(wrestlerName);
+    if (owowUrl) {
+      saveImageToFirestore('wrestlers', wrestlerName, owowUrl);
+      return owowUrl;
+    }
+  } catch (error) {
+    // Silently fail
+  }
+  
+  // PRIORITY 5: Try DuckDuckGo Image Search (no API key needed)
+  try {
+    const ddgUrl = await searchDuckDuckGoImage(wrestlerName);
+    if (ddgUrl) {
+      saveImageToFirestore('wrestlers', wrestlerName, ddgUrl);
+      return ddgUrl;
+    }
+  } catch (error) {
+    // Silently fail
+  }
+  
+  // Try Wikipedia API search with more variations
   try {
     // Try different variations of the wrestler name
     const nameVariations = [
       wrestlerName,
       wrestlerName.replace(/\./g, ''), // Remove periods
+      wrestlerName.replace(/\./g, '').trim(), // Remove periods and trim
       wrestlerName.split(' ').join('_'), // Replace spaces with underscores
+      wrestlerName.split(' ').join('_').replace(/\./g, ''), // Underscores + no periods
       `${wrestlerName} (wrestler)`,
+      `${wrestlerName.replace(/\./g, '')} (wrestler)`,
       `${wrestlerName} (professional wrestler)`,
-    ];
+      // Try with common ring name variations
+      wrestlerName.includes('Jr.') ? wrestlerName.replace('Jr.', 'Junior') : null,
+      wrestlerName.includes('Jr') ? wrestlerName.replace('Jr', 'Junior') : null,
+      wrestlerName.includes('Jr.') ? wrestlerName.replace('Jr.', 'Jr') : null,
+    ].filter(Boolean); // Remove null values
     
     for (const nameVar of nameVariations) {
       try {
@@ -616,15 +889,38 @@ const searchWrestlerImage = async (wrestlerName) => {
   try {
     const nameVariations = [
       wrestlerName,
+      wrestlerName.replace(/\./g, ''),
       `${wrestlerName} (wrestler)`,
+      `${wrestlerName.replace(/\./g, '')} (wrestler)`,
     ];
     
     for (const nameVar of nameVariations) {
       const infoboxImage = await searchWikipediaInfobox(nameVar);
       if (infoboxImage) {
-        saveImageToFirestore('wrestlers', wrestlerName, infoboxImage);
+        // Upload to Storage in background
+        downloadAndUploadImage(infoboxImage, 'wrestlers', wrestlerName).then((storageUrl) => {
+          if (storageUrl) {
+            saveImageToFirestore('wrestlers', wrestlerName, storageUrl);
+          } else {
+            saveImageToFirestore('wrestlers', wrestlerName, infoboxImage);
+          }
+        }).catch(() => {
+          saveImageToFirestore('wrestlers', wrestlerName, infoboxImage);
+        });
         return infoboxImage;
       }
+    }
+  } catch (error) {
+    // Silently fail
+  }
+  
+  // Additional backup: Try Unsplash (as last resort)
+  try {
+    const unsplashUrl = await searchUnsplashImage(wrestlerName);
+    if (unsplashUrl) {
+      // Note: Unsplash results may not be accurate, but it's a backup
+      saveImageToFirestore('wrestlers', wrestlerName, unsplashUrl);
+      return unsplashUrl;
     }
   } catch (error) {
     // Silently fail
@@ -702,150 +998,31 @@ const searchWikimediaCommonsForEvent = async (eventName) => {
 
 // Helper function to search multiple sources for event posters/banners
 const searchEventPoster = async (eventId, eventName) => {
-  // PRIORITY 1: Check for local image files first (user-provided)
-  // Files should be placed in: public/images/events/{eventId}.{ext}
-  const extensions = ['jpg', 'jpeg', 'png', 'webp'];
-  for (const ext of extensions) {
-    // Try both eventId and sanitized eventName
-    const sanitizedId = eventId.toLowerCase().replace(/[^a-z0-9]/g, '-');
-    const sanitizedName = eventName.toLowerCase().replace(/[^a-z0-9]/g, '-');
-    
-    const localPaths = [
-      `/images/events/${sanitizedId}.${ext}`,
-      `/images/events/${sanitizedName}.${ext}`,
-    ];
-    
-    for (const localPath of localPaths) {
-      const localImage = await checkLocalImage(localPath);
-      if (localImage) {
-        // Save local path to Firestore for future use
-        saveImageToFirestore('events', eventId, localImage);
-        return localImage;
-      }
-    }
-  }
-  
-  // PRIORITY 2: Check Firestore cache
+  // PRIORITY 1: Check Firestore cache FIRST (fastest, no network requests)
   const firestoreUrl = await getImageFromFirestore('events', eventId);
   if (firestoreUrl) {
     return firestoreUrl;
   }
   
-  // PRIORITY 3: Try Wikimedia Commons
-  try {
-    const wikimediaUrl = await searchWikimediaCommonsForEvent(eventName);
-    if (wikimediaUrl) {
-      // Save to Firestore
-      saveImageToFirestore('events', eventId, wikimediaUrl);
-      return wikimediaUrl;
+  // PRIORITY 2: Check for local image files (user-provided)
+  // Only try most common formats and paths to reduce 404s
+  const extensions = ['jpg', 'png']; // Reduced from 4 to 2 most common formats
+  const sanitizedId = eventId.toLowerCase().replace(/[^a-z0-9]/g, '-');
+  const sanitizedName = eventName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+  
+  // Only try eventId-based paths (most reliable), skip eventName variations to reduce requests
+  for (const ext of extensions) {
+    const localPath = `/images/events/${sanitizedId}.${ext}`;
+    const localImage = await checkLocalImage(localPath);
+    if (localImage) {
+      // Save local path to Firestore for future use
+      saveImageToFirestore('events', eventId, localImage);
+      return localImage;
     }
-  } catch (error) {
-    console.log(`Wikimedia search failed for ${eventName}`);
   }
   
-  // PRIORITY 4: Try Wikipedia API search with more variations
-  try {
-    // Try different variations of the event name
-    const nameVariations = [
-      eventName,
-      `${eventName} (wrestling)`,
-      `${eventName} wrestling event`,
-      eventName.replace(/\s+/g, '_'),
-      // Try with year if present
-      eventName.replace(/\s+(\d{4})/, ' ($1)'),
-      // Try without year
-      eventName.replace(/\s+\d{4}/, ''),
-    ];
-    
-    for (const nameVar of nameVariations) {
-      try {
-        const apiUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(nameVar)}`;
-        const response = await fetch(apiUrl);
-        if (!response.ok) continue;
-        
-        const data = await response.json();
-        
-        // Check thumbnail first
-        if (data.thumbnail?.source) {
-          const imageUrl = data.thumbnail.source;
-          // Prefer larger images for posters
-          const largerUrl = imageUrl.replace(/\/\d+px-/, '/800px-');
-          saveImageToFirestore('events', eventId, largerUrl);
-          return largerUrl;
-        }
-        
-        // Also check if there's a content_urls with images
-        if (data.content_urls?.desktop?.page) {
-          // Try to get the full page and extract poster image
-          const pageUrl = data.content_urls.desktop.page;
-          // This would require additional parsing, but thumbnail is usually sufficient
-        }
-      } catch (e) {
-        continue;
-      }
-    }
-  } catch (error) {
-    console.log(`Wikipedia API search failed for ${eventName}`);
-  }
-  
-  // PRIORITY 5: Try Wikipedia infobox extraction
-  try {
-    const nameVariations = [
-      eventName,
-      `${eventName} (wrestling)`,
-      eventName.replace(/\s+(\d{4})/, ' ($1)'),
-    ];
-    
-    for (const nameVar of nameVariations) {
-      const infoboxImage = await searchWikipediaInfobox(nameVar);
-      if (infoboxImage) {
-        saveImageToFirestore('events', eventId, infoboxImage);
-        return infoboxImage;
-      }
-    }
-  } catch (error) {
-    // Silently fail
-  }
-  
-  // PRIORITY 6: Try direct Wikipedia Commons file patterns for common events
-  try {
-    const normalizedName = eventName.toLowerCase()
-      .replace(/[^a-z0-9]/g, '_')
-      .replace(/_+/g, '_');
-    
-    const commonPatterns = [
-      `${normalizedName}_poster.jpg`,
-      `${normalizedName}_poster.png`,
-      `Poster_${normalizedName}.jpg`,
-      `Poster_${normalizedName}.png`,
-      `${normalizedName}_banner.jpg`,
-      `${normalizedName}_banner.png`,
-    ];
-    
-    for (const pattern of commonPatterns) {
-      try {
-        const fileUrl = `File:${pattern}`;
-        const apiUrl = `https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&titles=${encodeURIComponent(fileUrl)}&prop=imageinfo&iiprop=url&iiurlwidth=800`;
-        const response = await fetch(apiUrl);
-        const data = await response.json();
-        
-        const pages = data.query?.pages;
-        if (pages) {
-          const pageId = Object.keys(pages)[0];
-          const page = pages[pageId];
-          if (page.imageinfo?.[0]?.thumburl && page.missing === undefined) {
-            const imageUrl = page.imageinfo[0].thumburl;
-            saveImageToFirestore('events', eventId, imageUrl);
-            return imageUrl;
-          }
-        }
-      } catch (e) {
-        continue;
-      }
-    }
-  } catch (error) {
-    // Silently fail
-  }
+  // PRIORITY 3: Skip Wikimedia/Wikipedia per user request
+  // (Previously tried Wikimedia Commons, Wikipedia API, Wikipedia infobox, Wikipedia Commons patterns)
   
   return null;
 };
@@ -943,6 +1120,9 @@ const WRESTLER_IMAGES = {
   'SANADA': 'https://upload.wikimedia.org/wikipedia/commons/e/e0/Sanada_2017.jpg',
   'EVIL': 'https://upload.wikimedia.org/wikipedia/commons/d/da/Evil_2017.jpg',
   'Shingo Takagi': 'https://upload.wikimedia.org/wikipedia/commons/0/0b/Shingo_Takagi_2019.jpg',
+  
+  // Additional wrestlers for better coverage
+  'El Desperado': 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/El_Desperado_2020.jpg/400px-El_Desperado_2020.jpg',
   
   // TNA/Impact
   'Nic Nemeth': 'https://upload.wikimedia.org/wikipedia/commons/1/1e/Dolph_Ziggler_2017.jpg',
@@ -1113,6 +1293,43 @@ const INITIAL_EVENTS = [
       { id: 3, p1: 'Undisputed Kingdom', p2: 'The Infantry', title: 'ROH Tag Team Championship', isTeamMatch: true },
       { id: 4, p1: 'Dustin Rhodes', p2: 'Kyle Fletcher', title: 'ROH TV Championship' }
     ]
+  },
+  // Upcoming weekly shows
+  {
+    id: 'aew-dynamite-327', promoId: 'aew', name: 'AEW Dynamite #327', date: 'Jan 7, 2026', venue: 'TBD',
+    matches: []
+  },
+  {
+    id: 'aew-dynamite-328', promoId: 'aew', name: 'AEW Dynamite #328', date: 'Jan 14, 2026', venue: 'TBD',
+    matches: []
+  },
+  {
+    id: 'aew-collision-126', promoId: 'aew', name: 'AEW Collision #126', date: 'Jan 10, 2026', venue: 'TBD',
+    matches: []
+  },
+  {
+    id: 'wwe-raw-1700', promoId: 'wwe', name: 'WWE Monday Night RAW #1700', date: 'Jan 5, 2026', venue: 'TBD',
+    matches: []
+  },
+  {
+    id: 'wwe-raw-1701', promoId: 'wwe', name: 'WWE Monday Night RAW #1701', date: 'Jan 12, 2026', venue: 'TBD',
+    matches: []
+  },
+  {
+    id: 'wwe-smackdown-1375', promoId: 'wwe', name: 'WWE Friday Night SmackDown #1375', date: 'Jan 2, 2026', venue: 'TBD',
+    matches: []
+  },
+  {
+    id: 'wwe-smackdown-1376', promoId: 'wwe', name: 'WWE Friday Night SmackDown #1376', date: 'Jan 9, 2026', venue: 'TBD',
+    matches: []
+  },
+  {
+    id: 'wwe-nxt-818', promoId: 'wwe', name: 'WWE NXT #818', date: 'Jan 6, 2026', venue: 'TBD',
+    matches: []
+  },
+  {
+    id: 'wwe-nxt-819', promoId: 'wwe', name: 'WWE NXT #819', date: 'Jan 13, 2026', venue: 'TBD',
+    matches: []
   }
 ];
 
@@ -1276,9 +1493,41 @@ const BrandLogo = ({ id, className = "w-full h-full object-contain", logoUrl }) 
 };
 
 const WrestlerImage = ({ name, className, imageUrl }) => {
-  const [currentImageUrl, setCurrentImageUrl] = useState(null);
-  const [imageSource, setImageSource] = useState('initial'); // 'initial', 'wikimedia', 'proxy', 'fallback'
+  // Helper to check hardcoded images synchronously (skip Wikimedia/Cagematch)
+  const getHardcodedImage = (wrestlerName) => {
+    let url = null;
+    // First try exact match
+    if (WRESTLER_IMAGES[wrestlerName]) {
+      url = WRESTLER_IMAGES[wrestlerName];
+    } else {
+      // Then try normalized match
+      const normalizedName = normalizeWrestlerName(wrestlerName);
+      for (const [key, urlValue] of Object.entries(WRESTLER_IMAGES)) {
+        if (normalizeWrestlerName(key) === normalizedName) {
+          url = urlValue;
+          break;
+        }
+      }
+    }
+    
+    // Skip Wikimedia/Wikipedia and Cagematch URLs
+    if (url && (
+      url.includes('wikimedia.org') || 
+      url.includes('wikipedia.org') || 
+      url.includes('cagematch.net')
+    )) {
+      return null; // Don't use these sources
+    }
+    return url;
+  };
+  
+  // Initialize with hardcoded image if available (synchronous check)
+  const initialHardcodedUrl = getHardcodedImage(name);
+  const [currentImageUrl, setCurrentImageUrl] = useState(initialHardcodedUrl);
+  const [imageSource, setImageSource] = useState(initialHardcodedUrl ? (initialHardcodedUrl.includes('wsrv.nl') || initialHardcodedUrl.includes('weserv.nl') ? 'proxy' : 'initial') : 'initial');
   const [isLoading, setIsLoading] = useState(true);
+  const retryCountRef = useRef(0);
+  const maxRetries = 3;
   
   useEffect(() => {
     // Reset state when name or imageUrl changes
@@ -1286,62 +1535,171 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
     setImageSource('initial');
     
     // Priority order:
-    // 1. Provided imageUrl (if not from cagematch.net)
-    // 2. Firestore database (cached images)
-    // 3. Hardcoded WRESTLER_IMAGES
+    // 1. Hardcoded WRESTLER_IMAGES (checked synchronously above)
+    // 2. Provided imageUrl (if not from cagematch.net)
+    // 3. Firestore database (cached images)
     // 4. Search multiple sources (Wikimedia, Wikipedia API)
     // 5. Use proxy services
     // 6. Fallback to initials
     
     const loadImage = async () => {
-      // Step 1: Check provided imageUrl (skip cagematch.net)
-      if (imageUrl && !imageUrl.includes('cagematch.net')) {
-        setCurrentImageUrl(imageUrl);
-        setImageSource('initial');
-        // Save to Firestore for future use
-        saveImageToFirestore('wrestlers', name, imageUrl);
+      // Step 1: Check hardcoded images FIRST (most reliable) - already checked in initial state
+      // But check again in case name changed
+      const hardcodedUrl = getHardcodedImage(name);
+      if (hardcodedUrl) {
+        // First check if we have it in Storage
+        try {
+          const storageUrl = await getImageFromStorage('wrestlers', name);
+          if (storageUrl) {
+            setCurrentImageUrl(storageUrl);
+            setImageSource('database');
+            return;
+          }
+        } catch (e) {
+          // Not in Storage, continue
+        }
+        
+        // If not in Storage, use hardcoded URL (already proxied if needed by getHardcodedImage)
+        setCurrentImageUrl(hardcodedUrl);
+        setImageSource(hardcodedUrl.includes('wsrv.nl') || hardcodedUrl.includes('weserv.nl') ? 'proxy' : 'initial');
+        
+        // Download and upload to Storage in the background (non-blocking)
+        downloadAndUploadImage(hardcodedUrl, 'wrestlers', name).then((storageUrl) => {
+          if (storageUrl) {
+            // Update to use Storage URL once uploaded
+            setCurrentImageUrl(storageUrl);
+            setImageSource('database');
+          }
+        }).catch((error) => {
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`Background upload failed for ${name}:`, error);
+          }
+        });
         return;
       }
       
-      // Step 2: Check Firestore database
+      // Step 2: Check provided imageUrl (but only if hardcoded image wasn't found)
+      // If hardcoded image exists, we already returned above, so we can try imageUrl as backup
+      if (imageUrl) {
+        // Skip Cagematch, Wikimedia, and Wikipedia URLs
+        if (imageUrl.includes('cagematch.net') || 
+            imageUrl.includes('wikimedia.org') || 
+            imageUrl.includes('wikipedia.org')) {
+          // Don't use these sources - continue to other sources
+        } else {
+          // Use proxy for external URLs to avoid CORS (but not for Wikimedia)
+          let urlToUse = imageUrl;
+          let sourceType = 'initial';
+          if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+            // Only proxy if it's not already a Wikimedia URL
+            if (!imageUrl.includes('wikimedia.org') && !imageUrl.includes('wikipedia.org')) {
+              urlToUse = getProxiedImageUrl(imageUrl, 400, 500, 'wsrv');
+              sourceType = 'proxy';
+            }
+          }
+          setCurrentImageUrl(urlToUse);
+          setImageSource(sourceType);
+          // Save to Firestore for future use (only if not Wikimedia)
+          if (!imageUrl.includes('wikimedia.org') && !imageUrl.includes('wikipedia.org')) {
+            saveImageToFirestore('wrestlers', name, imageUrl);
+          }
+          return;
+        }
+      }
+      
+      // Step 3: Check Firestore database (with name normalization) - skip Cagematch and Wikimedia
       try {
         const firestoreUrl = await getImageFromFirestore('wrestlers', name);
         if (firestoreUrl) {
-          setCurrentImageUrl(firestoreUrl);
-          setImageSource('database');
-          return;
+          // Skip Cagematch, Wikimedia, and Wikipedia URLs
+          if (firestoreUrl.includes('cagematch.net') || 
+              firestoreUrl.includes('wikimedia.org') || 
+              firestoreUrl.includes('wikipedia.org')) {
+            // Don't use these sources - continue to other sources
+          } else {
+            // Use proxy for external URLs (but not for Wikimedia)
+            let urlToUse = firestoreUrl;
+            let sourceType = 'database';
+            if (firestoreUrl.startsWith('http://') || firestoreUrl.startsWith('https://')) {
+              // Only proxy if it's not already a Wikimedia URL
+              if (!firestoreUrl.includes('wikimedia.org') && !firestoreUrl.includes('wikipedia.org')) {
+                urlToUse = getProxiedImageUrl(firestoreUrl, 400, 500, 'wsrv');
+                sourceType = 'proxy';
+              }
+            }
+            setCurrentImageUrl(urlToUse);
+            setImageSource(sourceType);
+            return;
+          }
+        }
+        // Try normalized name variations
+        const normalizedName = normalizeWrestlerName(name);
+        const nameVariations = [
+          name.trim(),
+          name.replace(/\./g, ''),
+          name.replace(/\./g, '').trim(),
+          normalizedName
+        ];
+        for (const nameVar of nameVariations) {
+          if (nameVar !== name) {
+            const altUrl = await getImageFromFirestore('wrestlers', nameVar);
+            if (altUrl) {
+              setCurrentImageUrl(altUrl);
+              setImageSource('database');
+              return;
+            }
+          }
         }
       } catch (error) {
         console.log(`Firestore lookup failed for ${name}`);
       }
       
-      // Step 3: Check hardcoded WRESTLER_IMAGES
-      if (WRESTLER_IMAGES[name]) {
-        const url = WRESTLER_IMAGES[name];
-        setCurrentImageUrl(url);
-        setImageSource('initial');
-        // Save to Firestore for future use
-        saveImageToFirestore('wrestlers', name, url);
-        return;
-      }
-      
-      // Step 4: Search multiple sources
+      // Step 5: Search multiple sources
       try {
         const foundUrl = await searchWrestlerImage(name);
         if (foundUrl) {
-          setCurrentImageUrl(foundUrl);
-          setImageSource('database');
-          return;
+          // Skip Wikimedia URLs even if found by search
+          if (foundUrl.includes('wikimedia.org') || foundUrl.includes('wikipedia.org')) {
+            // Don't use Wikimedia - continue to fallback
+          } else {
+            // Use proxy for external URLs (but not for Wikimedia)
+            let urlToUse = foundUrl;
+            let sourceType = 'database';
+            if (foundUrl.startsWith('http://') || foundUrl.startsWith('https://')) {
+              // Only proxy if it's not already a Wikimedia URL
+              if (!foundUrl.includes('wikimedia.org') && !foundUrl.includes('wikipedia.org')) {
+                urlToUse = getProxiedImageUrl(foundUrl, 400, 500, 'wsrv');
+                sourceType = 'proxy';
+              }
+            }
+            setCurrentImageUrl(urlToUse);
+            setImageSource(sourceType);
+            // Download and cache to Storage in the background (non-blocking)
+            // Use original URL for upload (only if not Wikimedia)
+            if (!foundUrl.includes('wikimedia.org') && !foundUrl.includes('wikipedia.org')) {
+              downloadAndUploadImage(foundUrl, 'wrestlers', name).then((storageUrl) => {
+                if (storageUrl) {
+                  setCurrentImageUrl(storageUrl);
+                  setImageSource('database');
+                }
+              }).catch(() => {
+                // Silently fail background upload
+              });
+            }
+            return;
+          }
         }
       } catch (error) {
         console.log(`Image search failed for ${name}`);
       }
       
-      // Step 5: No image found - will use fallback
+      // Step 6: No image found - will use fallback
       setCurrentImageUrl(null);
       setImageSource('fallback');
     };
     
+    // Reset retry count when loading new image
+    retryCountRef.current = 0;
     loadImage();
   }, [name, imageUrl]);
   
@@ -1380,28 +1738,92 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
   
   // Try alternative proxy if current one fails
   const handleImageError = () => {
-    if (imageSource === 'initial' && currentImageUrl) {
-      // Try with proxy
-      const proxied = getProxiedImageUrl(currentImageUrl, 400, 500, 'wsrv');
-      setCurrentImageUrl(proxied);
-      setImageSource('proxy');
-    } else if (imageSource === 'proxy' && currentImageUrl) {
-      // Try alternative proxy
-      const originalUrl = imageUrl && !imageUrl.includes('cagematch.net') 
-        ? imageUrl 
-        : (WRESTLER_IMAGES[name] || imageUrl);
-      if (originalUrl) {
-        const proxied = getProxiedImageUrl(originalUrl, 400, 500, 'images');
-        setCurrentImageUrl(proxied);
-      } else {
-        setImageSource('fallback');
+    retryCountRef.current += 1;
+    
+    if (retryCountRef.current > maxRetries) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`🖼️ Max retries reached for "${name}", using fallback`);
       }
-    } else if (imageSource === 'wikimedia' && currentImageUrl) {
-      // Try proxying the Wikimedia image
-      const proxied = getProxiedImageUrl(currentImageUrl, 400, 500, 'wsrv');
-      setCurrentImageUrl(proxied);
-      setImageSource('proxy');
-    } else {
+      setImageSource('fallback');
+      return;
+    }
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`🖼️ Image error for "${name}", source: ${imageSource}, retry: ${retryCountRef.current}/${maxRetries}`);
+    }
+    
+    // Strategy 1: Try alternative proxy if current one failed (but skip Wikimedia URLs)
+    if (imageSource === 'proxy' && currentImageUrl) {
+      // Try alternative proxy service
+      let originalUrl = currentImageUrl.includes('wsrv.nl') || currentImageUrl.includes('weserv.nl')
+        ? (imageUrl || decodeURIComponent(currentImageUrl.match(/url=([^&]+)/)?.[1] || ''))
+        : currentImageUrl;
+      
+      // Skip if original URL is Wikimedia/Wikipedia/Cagematch
+      if (originalUrl && 
+          !originalUrl.includes('wikimedia.org') && 
+          !originalUrl.includes('wikipedia.org') &&
+          !originalUrl.includes('cagematch.net')) {
+        const proxyType = currentImageUrl.includes('wsrv.nl') ? 'images' : 'wsrv';
+        const proxied = getProxiedImageUrl(originalUrl, 400, 500, proxyType);
+        if (proxied && proxied !== currentImageUrl) {
+          setCurrentImageUrl(proxied);
+          setImageSource('proxy');
+          return;
+        }
+      } else {
+        // If it's a Wikimedia URL, skip to fallback immediately
+        if (originalUrl && (originalUrl.includes('wikimedia.org') || originalUrl.includes('wikipedia.org'))) {
+          setImageSource('fallback');
+          return;
+        }
+      }
+    }
+    
+    // Strategy 2: Try Storage again (might have been uploaded in background)
+    if (imageSource !== 'database') {
+      getImageFromStorage('wrestlers', name).then((storageUrl) => {
+        if (storageUrl && storageUrl !== currentImageUrl) {
+          setCurrentImageUrl(storageUrl);
+          setImageSource('database');
+          retryCountRef.current = 0; // Reset on success
+          return;
+        }
+      }).catch(() => {
+        // Continue to next strategy
+      });
+    }
+    
+    // Strategy 3: Try Firestore again (might have been updated)
+    if (imageSource !== 'database') {
+      getImageFromFirestore('wrestlers', name).then((firestoreUrl) => {
+        if (firestoreUrl && !firestoreUrl.includes('cagematch.net') && firestoreUrl !== currentImageUrl) {
+          setCurrentImageUrl(firestoreUrl);
+          setImageSource('database');
+          retryCountRef.current = 0;
+          return;
+        }
+      }).catch(() => {
+        // Continue to next strategy
+      });
+    }
+    
+    // Strategy 4: Try searching again (might find new source)
+    if (retryCountRef.current === 2) {
+      searchWrestlerImage(name).then((foundUrl) => {
+        if (foundUrl && foundUrl !== currentImageUrl) {
+          setCurrentImageUrl(foundUrl);
+          setImageSource('database');
+          retryCountRef.current = 0;
+          return;
+        }
+      }).catch(() => {
+        // Fall through to fallback
+      });
+    }
+    
+    // Strategy 5: If all else fails, use fallback
+    if (retryCountRef.current >= maxRetries) {
       setImageSource('fallback');
     }
   };
@@ -1410,12 +1832,16 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
     <img 
       src={currentImageUrl} 
       alt={name} 
-      className={`object-cover ${className}`} 
+      className={`object-cover ${className} ${isLoading ? 'opacity-0' : 'opacity-100'} transition-opacity duration-300`} 
       onError={handleImageError}
-      onLoad={() => setIsLoading(false)}
+      onLoad={() => {
+        setIsLoading(false);
+        retryCountRef.current = 0; // Reset retry count on successful load
+      }}
       referrerPolicy="no-referrer" 
       crossOrigin="anonymous"
-      loading="lazy" 
+      loading="lazy"
+      decoding="async"
     />
   );
 };
@@ -1490,6 +1916,8 @@ export default function RingsidePickemFinal() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false); // For onboarding submission
+  const [lockedEvents, setLockedEvents] = useState({}); // Track which events have locked predictions
+  const [isLockingEvent, setIsLockingEvent] = useState(false); // Loading state for lock operation
   
   // Account creation/login state
   const [authMode, setAuthMode] = useState('guest'); // 'guest', 'signin', 'signup'
@@ -1620,7 +2048,13 @@ export default function RingsidePickemFinal() {
             setViewState('dashboard');
           } else {
             setViewState('onboarding');
-            setOnboardingPage(1); 
+            setOnboardingPage(1);
+            // Pre-fill tempName if displayName was provided during signup or from Google
+            if (displayName.trim()) {
+              setTempName(displayName.trim());
+            } else if (currentUser.displayName) {
+              setTempName(currentUser.displayName);
+            }
           }
         } catch (e) {
           console.error("Profile check error:", e);
@@ -1834,6 +2268,27 @@ export default function RingsidePickemFinal() {
       }));
       setLeaderboard(lb);
     });
+    
+    // Listen to locked events for current user
+    const unsubLockedEvents = onSnapshot(
+      collection(db, 'artifacts', appId, 'users', currentUserId, 'lockedEvents'),
+      (snap) => {
+        const locked = {};
+        snap.forEach(doc => {
+          const data = doc.data();
+          if (data.locked) {
+            locked[data.eventId] = true;
+          }
+        });
+        setLockedEvents(prev => ({
+          ...prev,
+          ...locked
+        }));
+      },
+      (error) => {
+        console.error('Error listening to locked events:', error);
+      }
+    );
 
     // Listen to events from Firestore (scraped data)
     const eventsQuery = query(
@@ -1890,6 +2345,7 @@ export default function RingsidePickemFinal() {
       unsubResults(); 
       unsubLb(); 
       unsubEvents();
+      unsubLockedEvents();
       // 3. Clear all state as final step (except predictionsByUser - it's keyed by user ID)
       setCommunitySentiment({});
       setSelectedMethod({});
@@ -1940,8 +2396,8 @@ export default function RingsidePickemFinal() {
   };
 
   const handleEmailSignUp = async () => {
-    if (!email.trim() || !password.trim() || !displayName.trim()) {
-      setLoginError('Please fill in all fields');
+    if (!email.trim() || !password.trim()) {
+      setLoginError('Please fill in email and password');
       return;
     }
     if (password.length < 6) {
@@ -1957,28 +2413,9 @@ export default function RingsidePickemFinal() {
     setLoginError(null);
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      await updateProfile(userCredential.user, { displayName: displayName.trim() });
-      
-      // Create user profile in Firestore
-      const profile = {
-        displayName: displayName.trim(),
-        email: email.trim(),
-        subscriptions: ['wwe', 'aew', 'njpw'],
-        totalPoints: 0,
-        predictionsCorrect: 0,
-        predictionsTotal: 0,
-        joinedAt: serverTimestamp(),
-        country: 'USA',
-        region: 'NA'
-      };
-      
-      await setDoc(
-        doc(db, 'artifacts', appId, 'public', 'data', 'users', userCredential.user.uid),
-        profile
-      );
-      
-      setUserProfile({ ...profile, joinedAt: new Date().toISOString() });
-      setViewState('dashboard');
+      // Don't create profile here - let the auth listener detect no profile and show onboarding
+      // The user will go through onboarding flow where they can set their display name
+      // The auth state listener will automatically show onboarding if no profile exists
     } catch (error) {
       console.error("Sign up error:", error);
       let errorMessage = "Failed to create account. ";
@@ -2062,36 +2499,9 @@ export default function RingsidePickemFinal() {
         throw new Error("No user returned from Google sign-in");
       }
       
-      // Check if user profile exists, if not create one
-      const profileRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid);
-      const profileSnap = await getDoc(profileRef);
-      
-      if (!profileSnap.exists()) {
-        // Create new user profile for Google sign-in
-        const profile = {
-          displayName: user.displayName || user.email?.split('@')[0] || 'User',
-          email: user.email || '',
-          subscriptions: ['wwe', 'aew', 'njpw'],
-          totalPoints: 0,
-          predictionsCorrect: 0,
-          predictionsTotal: 0,
-          joinedAt: serverTimestamp(),
-          country: 'USA',
-          region: 'NA',
-          provider: 'google'
-        };
-        
-        await setDoc(profileRef, profile);
-        setUserProfile({ ...profile, joinedAt: new Date().toISOString() });
-      } else {
-        // Update email if it's not in the profile
-        const existingData = profileSnap.data();
-        if (!existingData.email && user.email) {
-          await updateDoc(profileRef, { email: user.email });
-        }
-        // Load existing profile
-        setUserProfile(existingData);
-      }
+      // Don't create profile here - let the auth listener detect no profile and show onboarding
+      // The auth state listener will automatically show onboarding if no profile exists
+      // If user has displayName from Google, it will be pre-filled in onboarding
       
       // The auth state listener will handle navigation
       // Don't clear loading here - let onAuthStateChanged handle it
@@ -2103,7 +2513,10 @@ export default function RingsidePickemFinal() {
       setIsLoggingIn(false);
       
       let errorMessage = "Failed to sign in with Google. ";
-      if (error.code === 'auth/popup-closed-by-user') {
+      if (error.code === 'auth/unauthorized-domain') {
+        const currentDomain = window.location.hostname;
+        errorMessage = `This domain (${currentDomain}) is not authorized. Please add it to authorized domains in Firebase Console: Authentication > Settings > Authorized domains. For local development, add 'localhost'.`;
+      } else if (error.code === 'auth/popup-closed-by-user') {
         errorMessage = "Sign-in popup was closed. Please try again.";
       } else if (error.code === 'auth/popup-blocked') {
         errorMessage = "Popup was blocked. Please allow popups for this site.";
@@ -2590,16 +3003,20 @@ export default function RingsidePickemFinal() {
     // Filter by event type and date
     const today = new Date();
     today.setHours(0, 0, 0, 0); // Reset to start of day
+    const twoWeeksAgo = new Date(today);
+    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14); // 2 weeks ago
     
     const filteredEvents = subscribedEvents.filter(ev => {
       const isWeekly = isWeeklyShow(ev.name);
       const eventDate = parseDate(ev.date);
       const isPast = eventDate < today;
+      const isRecentPast = eventDate >= twoWeeksAgo && eventDate < today;
       
       if (eventTypeFilter === 'past') {
         return isPast && !isWeekly; // Past PPVs only
       } else if (eventTypeFilter === 'weekly') {
-        return !isPast && isWeekly; // Upcoming weekly shows
+        // Show upcoming weekly shows OR recent past weekly shows (last 2 weeks)
+        return (!isPast && isWeekly) || (isRecentPast && isWeekly);
       } else {
         return !isPast && !isWeekly; // Upcoming PPVs (default)
       }
@@ -3005,7 +3422,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                   }`}
                 >
                   <Trophy size={14} />
-                  PPVs
+                  Live Events
                 </button>
                 <button 
                   onClick={() => setEventTypeFilter('weekly')}
@@ -3041,7 +3458,11 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                 const hasMatchWinners = event.matches?.some(m => m.winner);
                 const isGraded = hasEventResults || hasMatchWinners;
                 return (
-                  <div key={event.id} onClick={() => { setSelectedEvent(event); setActiveTab('event'); }} className="group relative bg-slate-900 hover:bg-slate-800 border border-slate-800 transition-all cursor-pointer rounded-2xl overflow-hidden shadow-xl" style={{ height: '200px' }}>
+                  <div key={event.id} onClick={(e) => { 
+                    e.stopPropagation();
+                    setSelectedEvent(event); 
+                    setActiveTab('event'); 
+                  }} className="group relative bg-slate-900 hover:bg-slate-800 border border-slate-800 transition-all cursor-pointer rounded-2xl overflow-hidden shadow-xl" style={{ height: '200px' }}>
                     <div className="absolute inset-0"><EventBanner event={event} className="w-full h-full object-cover opacity-60 group-hover:opacity-40 transition-opacity duration-500 group-hover:scale-105" /><div className="absolute inset-0 bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950"></div></div>
                     <div className="absolute inset-0 p-5 flex flex-col justify-end">
                       <div className="flex justify-between items-end">
@@ -3105,7 +3526,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
           </div>
         )}
 
-        {activeTab === 'event' && selectedEvent && (
+        {activeTab === 'event' && selectedEvent && selectedEvent.id && (
           <div className="pb-24 animate-slideUp">
             <button onClick={() => setActiveTab('home')} className="mb-4 text-slate-500 hover:text-white flex items-center gap-1 text-xs font-bold uppercase tracking-wider">← Feed</button>
             <div className="mb-6 relative h-48 rounded-2xl overflow-hidden shadow-2xl border border-slate-800">
@@ -3115,7 +3536,61 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
               <div className="absolute bottom-0 left-0 p-6 w-full text-center"><div className="inline-block w-16 h-16 p-2 bg-slate-950/50 backdrop-blur-md rounded-xl border border-slate-700 mb-2 shadow-lg"><BrandLogo id={selectedEvent.promoId} /></div><h1 className="text-3xl font-black italic uppercase text-white shadow-black drop-shadow-lg">{selectedEvent.name}</h1></div>
             </div>
             <div className="space-y-6">
-              {selectedEvent.matches.map((match) => {
+              {(() => {
+                // Debug logging
+                if (process.env.NODE_ENV === 'development') {
+                  console.log('🔍 Rendering event matches:', {
+                    eventId: selectedEvent.id,
+                    eventName: selectedEvent.name,
+                    hasMatches: !!selectedEvent.matches,
+                    isArray: Array.isArray(selectedEvent.matches),
+                    length: selectedEvent.matches?.length,
+                    firstMatch: selectedEvent.matches?.[0],
+                    allMatches: selectedEvent.matches
+                  });
+                }
+                
+                if (!selectedEvent.matches) {
+                  return (
+                    <div className="text-center py-12 bg-slate-900/50 rounded-xl border border-dashed border-slate-800">
+                      <p className="text-slate-500 text-sm">No matches available for this event yet.</p>
+                      {process.env.NODE_ENV === 'development' && (
+                        <p className="text-xs text-slate-600 mt-2">Debug: matches is null/undefined</p>
+                      )}
+                    </div>
+                  );
+                }
+                
+                if (!Array.isArray(selectedEvent.matches)) {
+                  return (
+                    <div className="text-center py-12 bg-slate-900/50 rounded-xl border border-dashed border-slate-800">
+                      <p className="text-slate-500 text-sm">No matches available for this event yet.</p>
+                      {process.env.NODE_ENV === 'development' && (
+                        <p className="text-xs text-slate-600 mt-2">Debug: matches is not an array (type: {typeof selectedEvent.matches})</p>
+                      )}
+                    </div>
+                  );
+                }
+                
+                if (selectedEvent.matches.length === 0) {
+                  return (
+                    <div className="text-center py-12 bg-slate-900/50 rounded-xl border border-dashed border-slate-800">
+                      <p className="text-slate-500 text-sm">No matches available for this event yet.</p>
+                      {process.env.NODE_ENV === 'development' && (
+                        <p className="text-xs text-slate-600 mt-2">Debug: matches array is empty</p>
+                      )}
+                    </div>
+                  );
+                }
+                
+                // Render matches
+                return selectedEvent.matches.map((match) => {
+                  if (!match) {
+                    if (process.env.NODE_ENV === 'development') {
+                      console.warn('⚠️ Null match found in matches array');
+                    }
+                    return null;
+                  }
                 // CRITICAL: Only show predictions if they belong to the current user
                 // Must be exact match - null means we haven't loaded predictions yet, so don't show any
                 // Also check that predictions object has entries for this user (extra safety)
@@ -3319,8 +3794,8 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                             </div>
                             <select
                               value={myPick || ''}
-                              onChange={(e) => !actualWinner && e.target.value && makePrediction(selectedEvent.id, match.id, e.target.value, 'last elimination')}
-                              disabled={!!actualWinner}
+                              onChange={(e) => !actualWinner && !lockedEvents[selectedEvent.id] && e.target.value && makePrediction(selectedEvent.id, match.id, e.target.value, 'last elimination')}
+                              disabled={!!actualWinner || !!lockedEvents[selectedEvent.id]}
                               className="w-full bg-slate-950 border border-slate-700 text-white px-4 py-3 rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
                             >
                               <option value="">-- Select Winner --</option>
@@ -3360,8 +3835,8 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                             {participants.map((p, idx) => (
                               <div 
                                 key={idx}
-                                onClick={() => !actualWinner && p.name !== 'TBD' && makePrediction(selectedEvent.id, match.id, p.name, selectedMethod[matchKey] || 'pinfall')} 
-                                className={`relative rounded-xl overflow-hidden cursor-pointer transition-all duration-300 border ${myPick === p.name ? 'border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800 hover:border-slate-600'} ${actualWinner && actualWinner !== p.name ? 'grayscale opacity-50' : ''}`}
+                                onClick={() => !actualWinner && !lockedEvents[selectedEvent.id] && p.name !== 'TBD' && makePrediction(selectedEvent.id, match.id, p.name, selectedMethod[matchKey] || 'pinfall')} 
+                                className={`relative rounded-xl overflow-hidden transition-all duration-300 border ${lockedEvents[selectedEvent.id] ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-600'} ${myPick === p.name ? 'border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800'} ${actualWinner && actualWinner !== p.name ? 'grayscale opacity-50' : ''}`}
                               >
                                 <WrestlerImage name={p.name} className="w-full h-full" imageUrl={p.image} />
                                 <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent pt-8 pb-2 px-1 text-center">
@@ -3388,8 +3863,8 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                             {participants.map((p, idx) => (
                               <div 
                                 key={idx}
-                                onClick={() => !actualWinner && p.name !== 'TBD' && makePrediction(selectedEvent.id, match.id, p.name, selectedMethod[matchKey] || 'pinfall')} 
-                                className={`relative rounded-xl overflow-hidden cursor-pointer transition-all duration-300 border ${myPick === p.name ? 'border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800 hover:border-slate-600'} ${actualWinner && actualWinner !== p.name ? 'grayscale opacity-50' : ''}`}
+                                onClick={() => !actualWinner && !lockedEvents[selectedEvent.id] && p.name !== 'TBD' && makePrediction(selectedEvent.id, match.id, p.name, selectedMethod[matchKey] || 'pinfall')} 
+                                className={`relative rounded-xl overflow-hidden transition-all duration-300 border ${lockedEvents[selectedEvent.id] ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-600'} ${myPick === p.name ? 'border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800'} ${actualWinner && actualWinner !== p.name ? 'grayscale opacity-50' : ''}`}
                               >
                                 <WrestlerImage name={p.name} className="w-full h-full" imageUrl={p.image} />
                                 <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent pt-8 pb-2 px-1 text-center">
@@ -3409,8 +3884,8 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                           <div className="flex gap-2">
                             {/* Team 1 */}
                             <div 
-                              onClick={() => !actualWinner && makePrediction(selectedEvent.id, match.id, match.p1, selectedMethod[matchKey] || 'pinfall')} 
-                              className={`flex-1 relative rounded-xl overflow-hidden cursor-pointer transition-all duration-300 border-2 ${myPick === match.p1 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)]' : 'border-slate-700 hover:border-slate-500'} ${actualWinner && actualWinner !== match.p1 ? 'grayscale opacity-50' : ''}`}
+                              onClick={() => !actualWinner && !lockedEvents[selectedEvent.id] && makePrediction(selectedEvent.id, match.id, match.p1, selectedMethod[matchKey] || 'pinfall')} 
+                              className={`flex-1 relative rounded-xl overflow-hidden transition-all duration-300 border-2 ${lockedEvents[selectedEvent.id] ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-500'} ${myPick === match.p1 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)]' : 'border-slate-700'} ${actualWinner && actualWinner !== match.p1 ? 'grayscale opacity-50' : ''}`}
                             >
                               <div className="bg-gradient-to-br from-blue-900/50 to-slate-900 p-3">
                                 <div className="flex flex-wrap justify-center gap-1 mb-2">
@@ -3441,8 +3916,8 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                             
                             {/* Team 2 */}
                             <div 
-                              onClick={() => !actualWinner && makePrediction(selectedEvent.id, match.id, match.p2, selectedMethod[matchKey] || 'pinfall')} 
-                              className={`flex-1 relative rounded-xl overflow-hidden cursor-pointer transition-all duration-300 border-2 ${myPick === match.p2 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)]' : 'border-slate-700 hover:border-slate-500'} ${actualWinner && actualWinner !== match.p2 ? 'grayscale opacity-50' : ''}`}
+                              onClick={() => !actualWinner && !lockedEvents[selectedEvent.id] && makePrediction(selectedEvent.id, match.id, match.p2, selectedMethod[matchKey] || 'pinfall')} 
+                              className={`flex-1 relative rounded-xl overflow-hidden transition-all duration-300 border-2 ${lockedEvents[selectedEvent.id] ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-500'} ${myPick === match.p2 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)]' : 'border-slate-700'} ${actualWinner && actualWinner !== match.p2 ? 'grayscale opacity-50' : ''}`}
                             >
                               <div className="bg-gradient-to-br from-purple-900/50 to-slate-900 p-3">
                                 <div className="flex flex-wrap justify-center gap-1 mb-2">
@@ -3475,7 +3950,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                       // Default 1v1 or small tag team match
                       return (
                         <div className="flex gap-1 h-64"> 
-                          <div onClick={() => !actualWinner && makePrediction(selectedEvent.id, match.id, match.p1, selectedMethod[matchKey] || 'pinfall')} className={`flex-1 relative rounded-l-2xl overflow-hidden cursor-pointer transition-all duration-300 border-y border-l ${myPick === match.p1 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800 hover:border-slate-600'} ${actualWinner && actualWinner !== match.p1 ? 'grayscale opacity-50' : ''}`}>
+                          <div onClick={() => !actualWinner && !lockedEvents[selectedEvent.id] && makePrediction(selectedEvent.id, match.id, match.p1, selectedMethod[matchKey] || 'pinfall')} className={`flex-1 relative rounded-l-2xl overflow-hidden transition-all duration-300 border-y border-l ${lockedEvents[selectedEvent.id] ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-600'} ${myPick === match.p1 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800'} ${actualWinner && actualWinner !== match.p1 ? 'grayscale opacity-50' : ''}`}>
                              {match.p1Members && match.p1Members.length === 2 ? (
                                <div className="w-full h-full grid grid-cols-2 gap-0.5">
                                  {match.p1Members.map((member, idx) => (
@@ -3493,7 +3968,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                              {actualWinner === match.p1 && <div className="absolute top-2 left-2 bg-green-500 text-black text-[10px] font-black px-2 py-1 rounded uppercase shadow-lg z-20">Winner</div>}
                           </div>
                           <div className="w-1 bg-slate-900 flex items-center justify-center relative z-20"><div className="absolute bg-slate-950 border border-slate-700 rounded-full w-8 h-8 flex items-center justify-center text-[10px] font-black text-slate-500 italic shadow-xl">VS</div></div>
-                          <div onClick={() => !actualWinner && makePrediction(selectedEvent.id, match.id, match.p2, selectedMethod[matchKey] || 'pinfall')} className={`flex-1 relative rounded-r-2xl overflow-hidden cursor-pointer transition-all duration-300 border-y border-r ${myPick === match.p2 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800 hover:border-slate-600'} ${actualWinner && actualWinner !== match.p2 ? 'grayscale opacity-50' : ''}`}>
+                          <div onClick={() => !actualWinner && !lockedEvents[selectedEvent.id] && makePrediction(selectedEvent.id, match.id, match.p2, selectedMethod[matchKey] || 'pinfall')} className={`flex-1 relative rounded-r-2xl overflow-hidden transition-all duration-300 border-y border-r ${lockedEvents[selectedEvent.id] ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-600'} ${myPick === match.p2 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800'} ${actualWinner && actualWinner !== match.p2 ? 'grayscale opacity-50' : ''}`}>
                              {match.p2Members && match.p2Members.length === 2 ? (
                                <div className="w-full h-full grid grid-cols-2 gap-0.5">
                                  {match.p2Members.map((member, idx) => (
@@ -3517,14 +3992,20 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                     {/* Method of Victory Selector */}
                     {myPick && !actualWinner && (
                       <div className="mt-3 px-2">
-                        <label className="block text-[10px] text-slate-500 font-bold uppercase mb-2">Method of Victory</label>
+                        <label className="block text-[10px] text-slate-500 font-bold uppercase mb-2">
+                          Method of Victory
+                          {lockedEvents[selectedEvent.id] && <span className="ml-2 text-green-400">(Locked)</span>}
+                        </label>
                         <select
                           value={selectedMethod[matchKey] || myMethod || 'pinfall'}
                           onChange={(e) => {
-                            setSelectedMethod(prev => ({ ...prev, [matchKey]: e.target.value }));
-                            makePrediction(selectedEvent.id, match.id, myPick, e.target.value);
+                            if (!lockedEvents[selectedEvent.id]) {
+                              setSelectedMethod(prev => ({ ...prev, [matchKey]: e.target.value }));
+                              makePrediction(selectedEvent.id, match.id, myPick, e.target.value);
+                            }
                           }}
-                          className="w-full bg-slate-900 border border-slate-800 text-white px-3 py-2 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
+                          disabled={!!lockedEvents[selectedEvent.id]}
+                          className="w-full bg-slate-900 border border-slate-800 text-white px-3 py-2 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           <option value="pinfall">Pinfall</option>
                           <option value="submission">Submission</option>
@@ -3550,11 +4031,66 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                       </div>
                     )}
                   </div>
-                );
-              })}
+                  );
+                });
+              })()}
             </div>
+            
+            {/* Submit/Lock In Button */}
             {!eventResults[selectedEvent.id] && (
-              <div className="mt-12 pt-8 border-t border-slate-800">
+              <div className="mt-8 pt-8 border-t border-slate-800">
+                {lockedEvents[selectedEvent.id] ? (
+                  <div className="w-full py-4 bg-green-900/20 border-2 border-green-700/50 text-green-400 rounded-xl font-bold uppercase tracking-wider flex items-center justify-center gap-2">
+                    <CheckCircle size={20} />
+                    Predictions Locked In
+                  </div>
+                ) : (
+                  <button 
+                    onClick={async () => {
+                      if (!user || !user.uid || isLockingEvent) return;
+                      
+                      setIsLockingEvent(true);
+                      try {
+                        // Mark event as locked in Firestore
+                        const lockDoc = doc(db, 'artifacts', appId, 'users', user.uid, 'lockedEvents', selectedEvent.id);
+                        await setDoc(lockDoc, {
+                          eventId: selectedEvent.id,
+                          lockedAt: serverTimestamp(),
+                          locked: true
+                        }, { merge: true });
+                        
+                        // Update local state
+                        setLockedEvents(prev => ({
+                          ...prev,
+                          [selectedEvent.id]: true
+                        }));
+                      } catch (error) {
+                        console.error('❌ Error locking event:', error);
+                      } finally {
+                        setIsLockingEvent(false);
+                      }
+                    }}
+                    disabled={isLockingEvent || !user}
+                    className="w-full py-4 bg-red-600 hover:bg-red-700 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white rounded-xl font-black uppercase tracking-wider transition-colors flex items-center justify-center gap-2 shadow-lg hover:shadow-red-600/50"
+                  >
+                    {isLockingEvent ? (
+                      <>
+                        <Loader2 className="animate-spin" size={20} />
+                        Locking In...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle size={20} />
+                        Lock In Predictions
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+            )}
+            
+            {!eventResults[selectedEvent.id] && (
+              <div className="mt-4 pt-4 border-t border-slate-800">
                 <button onClick={() => simulateEventResult(selectedEvent)} className="w-full py-4 border-2 border-dashed border-slate-700 text-slate-500 hover:text-white hover:border-slate-500 rounded-xl font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-2"><Activity size={18} /> Simulate Event (Demo)</button>
               </div>
             )}

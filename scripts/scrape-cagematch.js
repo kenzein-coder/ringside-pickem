@@ -12,7 +12,7 @@ import { writeFileSync, readFileSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, doc, setDoc, getDoc } from 'firebase/firestore';
+import { getFirestore, collection, doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -277,213 +277,8 @@ async function scrapeRecentEvents() {
   }
 }
 
-// Generate future weekly shows based on known schedules
-function generateFutureWeeklyShows() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const oneMonthLater = new Date(today);
-  oneMonthLater.setMonth(oneMonthLater.getMonth() + 1);
-  
-  const weeklyShows = [];
-  
-  // Find next occurrence of a day of week
-  const getNextDayOfWeek = (dayOfWeek, startDate = today) => {
-    const date = new Date(startDate);
-    const currentDay = date.getDay();
-    const daysUntil = (dayOfWeek - currentDay + 7) % 7;
-    if (daysUntil === 0 && date.getTime() === startDate.getTime()) {
-      return date; // Today is the day
-    }
-    date.setDate(date.getDate() + (daysUntil || 7));
-    return date;
-  };
-  
-  // AEW Dynamite - Every Wednesday
-  let dynamiteDate = getNextDayOfWeek(3); // Wednesday = 3
-  let dynamiteNum = 320; // Start from a reasonable number
-  while (dynamiteDate <= oneMonthLater) {
-    weeklyShows.push({
-      id: `aew-dynamite-${dynamiteNum}`,
-      promotionId: '2287',
-      promotionName: 'All Elite Wrestling',
-      name: `AEW Dynamite #${dynamiteNum}`,
-      date: formatDateToReadable(`${dynamiteDate.getDate().toString().padStart(2, '0')}.${(dynamiteDate.getMonth() + 1).toString().padStart(2, '0')}.${dynamiteDate.getFullYear()}`),
-      isWeekly: true,
-      matches: [] // Empty matches array - will be populated when event is announced/scraped
-    });
-    dynamiteDate.setDate(dynamiteDate.getDate() + 7);
-    dynamiteNum++;
-  }
-  
-  // AEW Collision - Every Saturday
-  let collisionDate = getNextDayOfWeek(6); // Saturday = 6
-  let collisionNum = 121; // Start from a reasonable number
-  while (collisionDate <= oneMonthLater) {
-    weeklyShows.push({
-      id: `aew-collision-${collisionNum}`,
-      promotionId: '2287',
-      promotionName: 'All Elite Wrestling',
-      name: `AEW Collision #${collisionNum}`,
-      date: formatDateToReadable(`${collisionDate.getDate().toString().padStart(2, '0')}.${(collisionDate.getMonth() + 1).toString().padStart(2, '0')}.${collisionDate.getFullYear()}`),
-      isWeekly: true,
-      matches: [] // Empty matches array - will be populated when event is announced/scraped
-    });
-    collisionDate.setDate(collisionDate.getDate() + 7);
-    collisionNum++;
-  }
-  
-  // WWE Monday Night RAW - Every Monday
-  let rawDate = getNextDayOfWeek(1); // Monday = 1
-  let rawNum = 1696; // Start from a reasonable number
-  while (rawDate <= oneMonthLater) {
-    weeklyShows.push({
-      id: `wwe-raw-${rawNum}`,
-      promotionId: '1',
-      promotionName: 'World Wrestling Entertainment',
-      name: `WWE Monday Night RAW #${rawNum}`,
-      date: formatDateToReadable(`${rawDate.getDate().toString().padStart(2, '0')}.${(rawDate.getMonth() + 1).toString().padStart(2, '0')}.${rawDate.getFullYear()}`),
-      isWeekly: true,
-      matches: [] // Empty matches array - will be populated when event is announced/scraped
-    });
-    rawDate.setDate(rawDate.getDate() + 7);
-    rawNum++;
-  }
-  
-  // WWE Friday Night SmackDown - Every Friday
-  let smackdownDate = getNextDayOfWeek(5); // Friday = 5
-  let smackdownNum = 1371; // Start from a reasonable number
-  while (smackdownDate <= oneMonthLater) {
-    weeklyShows.push({
-      id: `wwe-smackdown-${smackdownNum}`,
-      promotionId: '1',
-      promotionName: 'World Wrestling Entertainment',
-      name: `WWE Friday Night SmackDown #${smackdownNum}`,
-      date: formatDateToReadable(`${smackdownDate.getDate().toString().padStart(2, '0')}.${(smackdownDate.getMonth() + 1).toString().padStart(2, '0')}.${smackdownDate.getFullYear()}`),
-      isWeekly: true,
-      matches: [] // Empty matches array - will be populated when event is announced/scraped
-    });
-    smackdownDate.setDate(smackdownDate.getDate() + 7);
-    smackdownNum++;
-  }
-  
-  // WWE NXT - Every Tuesday
-  let nxtDate = getNextDayOfWeek(2); // Tuesday = 2
-  let nxtNum = 813; // Start from a reasonable number
-  while (nxtDate <= oneMonthLater) {
-    weeklyShows.push({
-      id: `wwe-nxt-${nxtNum}`,
-      promotionId: '1',
-      promotionName: 'World Wrestling Entertainment',
-      name: `WWE NXT #${nxtNum}`,
-      date: formatDateToReadable(`${nxtDate.getDate().toString().padStart(2, '0')}.${(nxtDate.getMonth() + 1).toString().padStart(2, '0')}.${nxtDate.getFullYear()}`),
-      isWeekly: true,
-      matches: [] // Empty matches array - will be populated when event is announced/scraped
-    });
-    nxtDate.setDate(nxtDate.getDate() + 7);
-    nxtNum++;
-  }
-  
-  return weeklyShows;
-}
-
-// Scrape upcoming weekly shows specifically
-// Note: The main page shows recent events (both past and upcoming)
-// We'll generate future weekly shows and combine with scraped ones
-async function scrapeUpcomingWeeklyShows() {
-  console.log('🔍 Generating future weekly shows...');
-  
-  // Generate future weekly shows
-  const generatedShows = generateFutureWeeklyShows();
-  console.log(`✅ Generated ${generatedShows.length} future weekly shows`);
-  
-  try {
-    // Also scrape from Cagematch to get any announced weekly shows
-    const url = 'https://www.cagematch.net/?id=1';
-    console.log(`📡 Fetching: ${url}`);
-    const html = await fetchHTML(url);
-    
-    await delay(DELAY_MS); // Be respectful
-    
-    const results = parseHTML(html);
-    const events = results.events;
-    
-    console.log(`✅ Found ${events.length} total events from Cagematch`);
-    
-    // Filter for major promotions only
-    const majorPromoIds = ['1', '2287', '7', '5', '122']; // WWE, AEW, NJPW, TNA, ROH
-    const majorEvents = events.filter(e => 
-      majorPromoIds.includes(e.promotionId) ||
-      e.promotionName?.toUpperCase().includes('WWE') ||
-      e.promotionName?.toUpperCase().includes('AEW') ||
-      e.promotionName?.toUpperCase().includes('NJPW') ||
-      e.promotionName?.toUpperCase().includes('TNA') ||
-      e.promotionName?.toUpperCase().includes('ROH')
-    );
-    
-    // Filter for weekly shows only (not PPVs)
-    const scrapedWeeklyShows = majorEvents.filter(e => {
-      const isWeekly = !isPPVEvent(e.name);
-      return isWeekly && e.date; // Must have a date
-    });
-    
-    console.log(`📺 Found ${scrapedWeeklyShows.length} weekly shows from Cagematch`);
-    
-    // Combine generated and scraped shows, removing duplicates by name similarity
-    const allShows = [...generatedShows];
-    const generatedNames = new Set(generatedShows.map(s => s.name.toLowerCase().replace(/#\d+/g, '').trim()));
-    
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    scrapedWeeklyShows.forEach(scraped => {
-      const normalizedName = scraped.name.toLowerCase().replace(/#\d+/g, '').trim();
-      // Only add if it's not a duplicate and is in the future
-      if (!generatedNames.has(normalizedName)) {
-        const [day, month, year] = scraped.date.split('.').map(Number);
-        const eventDate = new Date(year, month - 1, day);
-        eventDate.setHours(0, 0, 0, 0);
-        if (eventDate >= today) {
-          allShows.push({
-            id: scraped.id,
-            promotionId: scraped.promotionId,
-            promotionName: scraped.promotionName,
-            name: scraped.name,
-            date: formatDateToReadable(scraped.date),
-            isWeekly: true
-          });
-        }
-      }
-    });
-    
-    console.log(`📺 Total weekly shows: ${allShows.length}`);
-    
-    // Log which shows we found (limit to first 10 for readability)
-    allShows.slice(0, 10).forEach(show => {
-      console.log(`  • ${show.promotionName}: ${show.name} (${show.date})`);
-    });
-    if (allShows.length > 10) {
-      console.log(`  ... and ${allShows.length - 10} more`);
-    }
-    
-    return allShows;
-  } catch (error) {
-    console.error(`❌ Error scraping weekly shows:`, error.message);
-    // Return generated shows even if scraping fails
-    return generatedShows;
-  }
-}
-
 // Helper to check if event name looks like a PPV (not a weekly show)
 function isPPVEvent(eventName) {
-  // First check for known PPV names that might match weekly patterns
-  const ppvExceptions = [
-    /saturday\s*night'?s\s*main\s*event/i, // This is a PPV, not weekly
-    /world\s*tag\s*league\s*finals/i, // NJPW PPV
-  ];
-  if (ppvExceptions.some(pattern => pattern.test(eventName))) {
-    return true; // It's a PPV
-  }
-  
   const weeklyPatterns = [
     /dynamite/i,
     /collision/i,
@@ -491,6 +286,7 @@ function isPPVEvent(eventName) {
     /\braw\b/i,
     /smackdown/i,
     /\bnxt\b(?!\s*(takeover|stand|deliver|deadline|vengeance|battleground))/i,
+    /main\s*event/i,
     /superstars/i,
     /thunder/i,
     /nitro/i,
@@ -531,6 +327,19 @@ function getKnownUpcomingPPVs() {
         { id: 3, p1: 'Cody Rhodes', p2: 'Kevin Owens', title: 'Undisputed WWE Championship' },
         { id: 4, p1: 'Gunther', p2: 'Damian Priest', title: 'World Heavyweight Championship' },
         { id: 5, p1: 'LA Knight', p2: 'Shinsuke Nakamura', title: 'United States Championship' }
+      ]
+    },
+    { 
+      id: 'wwe-saturday-nights-main-event-dec-2025', 
+      name: "Saturday Night's Main Event", 
+      promotionId: '1', 
+      promotionName: 'WWE', 
+      date: 'Dec 14, 2025', 
+      venue: 'Nassau Coliseum, Uniondale, NY', 
+      isPPV: true,
+      matches: [
+        { id: 1, p1: 'Cody Rhodes', p2: 'Kevin Owens', title: 'Undisputed WWE Championship' },
+        { id: 2, p1: 'Gunther', p2: 'Jey Uso', title: 'World Heavyweight Championship' }
       ]
     },
     { 
@@ -835,10 +644,24 @@ function parseEventDetails(html) {
     details.bannerUrl = 'https://www.cagematch.net' + headerLogoMatch[1];
   }
   
-  // Look for event poster image (if available in InformationBox or elsewhere)
-  const posterMatch = html.match(/<img[^>]*src="([^"]*poster[^"]*\.(jpg|jpeg|png|gif|webp))"[^>]*/i);
+  // Look for event poster image - try multiple patterns
+  // Pattern 1: Direct poster image in InformationBox or content
+  let posterMatch = html.match(/<img[^>]*src="([^"]*poster[^"]*\.(jpg|jpeg|png|gif|webp))"[^>]*/i);
+  if (!posterMatch) {
+    // Pattern 2: Look for large images in InformationBox
+    posterMatch = html.match(/<div class="InformationBox[^"]*">[\s\S]*?<img[^>]*src="([^"]*\.(jpg|jpeg|png|gif|webp))"[^>]*width="[5-9]\d{2}"[^>]*>/i);
+  }
+  if (!posterMatch) {
+    // Pattern 3: Look for images with "poster" in alt text or title
+    posterMatch = html.match(/<img[^>]*(?:alt|title)="[^"]*poster[^"]*"[^>]*src="([^"]*\.(jpg|jpeg|png|gif|webp))"[^>]*/i);
+  }
+  if (!posterMatch) {
+    // Pattern 4: Look for large images (likely posters) in the main content area
+    posterMatch = html.match(/<img[^>]*src="([^"]*\.(jpg|jpeg|png|gif|webp))"[^>]*(?:width="[5-9]\d{2}"|height="[5-9]\d{2}")[^>]*>/i);
+  }
   if (posterMatch) {
-    details.posterUrl = posterMatch[1].startsWith('http') ? posterMatch[1] : 'https://www.cagematch.net' + posterMatch[1];
+    const posterUrl = posterMatch[1].startsWith('http') ? posterMatch[1] : 'https://www.cagematch.net' + posterMatch[1];
+    details.posterUrl = posterUrl;
   }
   
   // Extract matches from <div class="Matches"> - match until ContentDivider
@@ -888,12 +711,14 @@ function parseEventDetails(html) {
           const wrestlerId = linkMatch[1];
           const wrestlerName = linkMatch[2].trim();
           // Construct potential image URL (Cagematch uses /site/main/img/wrestler/{id}.jpg or similar)
+          // Try multiple formats
           const imageUrl = `https://www.cagematch.net/site/main/img/wrestler/${wrestlerId}.jpg`;
           allLinks.push({
             id: wrestlerId,
             name: wrestlerName,
             position: linkMatch.index,
-            imageUrl: imageUrl
+            imageUrl: imageUrl,
+            cagematchId: wrestlerId
           });
         }
         
@@ -1023,13 +848,60 @@ function parseEventDetails(html) {
   return details;
 }
 
-async function scrapeEventDetails(event) {
-  // If event doesn't have a cagematchEventId (like generated weekly shows), skip scraping
-  if (!event.cagematchEventId) {
-    console.log(`⏭️  Skipping detail scrape for ${event.name} (no Cagematch ID - likely generated)`);
-    return event; // Return as-is
+// Helper function to save image URL to Firestore
+async function saveImageToFirestore(type, identifier, imageUrl) {
+  if (!db || !appId || !imageUrl) return;
+  
+  try {
+    const imageDoc = doc(db, 'artifacts', appId, 'public', 'data', 'images', type);
+    const currentData = await getDoc(imageDoc);
+    const existingImages = currentData.exists() ? currentData.data() : {};
+    
+    await setDoc(imageDoc, {
+      ...existingImages,
+      [identifier]: imageUrl,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  } catch (error) {
+    console.log(`Failed to save image to Firestore (${type}/${identifier}):`, error.message);
+  }
+}
+
+// Function to scrape wrestler image from wrestler profile page
+async function scrapeWrestlerImage(wrestlerId, wrestlerName) {
+  if (!wrestlerId || !db) return null;
+  
+  try {
+    const url = `https://www.cagematch.net/?id=2&nr=${wrestlerId}`;
+    const html = await fetchHTML(url);
+    await delay(DELAY_MS);
+    
+    // Look for wrestler image in profile
+    // Pattern 1: Main profile image
+    let imageMatch = html.match(new RegExp(`<img[^>]*src="([^"]*wrestler[^"]*\/${wrestlerId}[^"]*\\.(jpg|jpeg|png|gif|webp))"[^>]*`, 'i'));
+    if (!imageMatch) {
+      // Pattern 2: Image in InformationBox
+      imageMatch = html.match(/<div class="InformationBox[^"]*">[\s\S]*?<img[^>]*src="([^"]*\.(jpg|jpeg|png|gif|webp))"[^>]*/i);
+    }
+    if (!imageMatch) {
+      // Pattern 3: Large image in content
+      imageMatch = html.match(/<img[^>]*src="([^"]*\.(jpg|jpeg|png|gif|webp))"[^>]*(?:width="[3-9]\d{2}"|height="[3-9]\d{2}")[^>]*>/i);
+    }
+    
+    if (imageMatch) {
+      const imageUrl = imageMatch[1].startsWith('http') ? imageMatch[1] : 'https://www.cagematch.net' + imageMatch[1];
+      // Save to Firestore
+      await saveImageToFirestore('wrestlers', wrestlerName, imageUrl);
+      return imageUrl;
+    }
+  } catch (error) {
+    console.log(`Failed to scrape wrestler image for ${wrestlerName} (ID: ${wrestlerId}):`, error.message);
   }
   
+  return null;
+}
+
+async function scrapeEventDetails(event) {
   console.log(`🔍 Scraping details for ${event.name}...`);
   
   try {
@@ -1049,11 +921,61 @@ async function scrapeEventDetails(event) {
       venue: details.venue || details.location || details.arena || event.venue,
       location: details.location || event.location,
       arena: details.arena || event.arena,
+      posterUrl: details.posterUrl || event.posterUrl,
+      bannerUrl: details.bannerUrl || event.bannerUrl,
       // IMPORTANT: Only use scraped matches if they exist AND have content, otherwise keep demo matches
       matches: (details.matches && details.matches.length > 0) ? details.matches : (event.matches || [])
     };
     
+    // Save event poster and banner to Firestore if available
+    if (eventDetails.posterUrl && db) {
+      await saveImageToFirestore('events', eventDetails.id, eventDetails.posterUrl);
+    }
+    if (eventDetails.bannerUrl && db) {
+      await saveImageToFirestore('events', `${eventDetails.id}_banner`, eventDetails.bannerUrl);
+    }
+    
+    // Collect all unique wrestlers from matches and save their images
+    const wrestlersToScrape = new Set();
+    if (eventDetails.matches && eventDetails.matches.length > 0) {
+      eventDetails.matches.forEach(match => {
+        // Collect from p1Members and p2Members
+        if (match.p1Members) {
+          match.p1Members.forEach(member => {
+            if (member.cagematchId) {
+              wrestlersToScrape.add({ id: member.cagematchId, name: member.name });
+            }
+          });
+        }
+        if (match.p2Members) {
+          match.p2Members.forEach(member => {
+            if (member.cagematchId) {
+              wrestlersToScrape.add({ id: member.cagematchId, name: member.name });
+            }
+          });
+        }
+        // Also check direct p1/p2 if they have cagematchId
+        if (match.p1Image && match.p1Image.includes('wrestler/')) {
+          const matchId = match.p1Image.match(/wrestler\/(\d+)/);
+          if (matchId) {
+            wrestlersToScrape.add({ id: matchId[1], name: match.p1 });
+          }
+        }
+        if (match.p2Image && match.p2Image.includes('wrestler/')) {
+          const matchId = match.p2Image.match(/wrestler\/(\d+)/);
+          if (matchId) {
+            wrestlersToScrape.add({ id: matchId[1], name: match.p2 });
+          }
+        }
+      });
+    }
+    
     console.log(`✅ Found ${details.matches.length} matches, venue: ${eventDetails.venue || 'N/A'}`);
+    if (eventDetails.posterUrl) console.log(`   📸 Found poster: ${eventDetails.posterUrl}`);
+    if (eventDetails.bannerUrl) console.log(`   🖼️  Found banner: ${eventDetails.bannerUrl}`);
+    if (wrestlersToScrape.size > 0) {
+      console.log(`   👤 Found ${wrestlersToScrape.size} unique wrestlers to scrape images for`);
+    }
     
     return eventDetails;
   } catch (error) {
@@ -1086,34 +1008,23 @@ async function main() {
     writeFileSync(join(__dirname, '../data/upcoming-ppvs.json'), JSON.stringify(upcomingPPVs, null, 2));
     console.log(`💾 Saved ${upcomingPPVs.length} upcoming PPVs to data/upcoming-ppvs.json`);
     
-    // Step 4: Scrape upcoming weekly shows
-    console.log('\n');
-    const weeklyShows = await scrapeUpcomingWeeklyShows();
-    
-    writeFileSync(join(__dirname, '../data/weekly-shows.json'), JSON.stringify(weeklyShows, null, 2));
-    console.log(`💾 Saved ${weeklyShows.length} weekly shows to data/weekly-shows.json`);
-    
-    // Combine all events (recent + upcoming PPVs + weekly shows, removing duplicates)
-    // Also filter out "Saturday Night's Main Event" as requested
+    // Combine all events (recent + upcoming PPVs, removing duplicates)
     const allEventsMap = new Map();
-    [...recentEvents, ...upcomingPPVs, ...weeklyShows]
-      .filter(event => !/saturday\s*night'?s\s*main\s*event/i.test(event.name))
-      .forEach(event => {
-        allEventsMap.set(event.id, event);
-      });
+    [...recentEvents, ...upcomingPPVs].forEach(event => {
+      allEventsMap.set(event.id, event);
+    });
     const allEvents = Array.from(allEventsMap.values());
     
     console.log(`\n📊 Total unique events: ${allEvents.length}`);
     
-    // Step 5: Scrape details for events and save to Firestore
+    // Step 4: Scrape details for events and save to Firestore
     console.log('\n🔍 Scraping event details and match cards...\n');
     const eventsWithDetails = [];
     
-    // Prioritize upcoming PPVs, then weekly shows, then recent events (limit to 30 total)
+    // Prioritize upcoming PPVs, then recent events (limit to 20 total)
     const eventsToScrape = [
-      ...upcomingPPVs.slice(0, 10), // First 10 upcoming PPVs
-      ...weeklyShows.slice(0, 15),   // Next 15 weekly shows
-      ...recentEvents.slice(0, 10)   // Plus 10 recent events
+      ...upcomingPPVs.slice(0, 15), // First 15 upcoming PPVs
+      ...recentEvents.slice(0, 10)  // Plus 10 recent events
     ];
     
     // Deduplicate
@@ -1122,7 +1033,7 @@ async function main() {
       if (seenIds.has(e.id)) return false;
       seenIds.add(e.id);
       return true;
-    }).slice(0, 30); // Max 30 (increased to include weekly shows)
+    }).slice(0, 20); // Max 20
     
     for (let i = 0; i < uniqueEventsToScrape.length; i++) {
       const event = uniqueEventsToScrape[i];
@@ -1181,6 +1092,69 @@ async function main() {
     
     if (db) {
       console.log('✅ All events saved to Firestore');
+    }
+    
+    // Step 5: Collect and scrape wrestler images from all matches
+    console.log('\n🖼️  Collecting wrestler images from matches...\n');
+    const allWrestlers = new Map();
+    
+    eventsWithDetails.forEach(event => {
+      if (event.matches && event.matches.length > 0) {
+        event.matches.forEach(match => {
+          // Collect from p1Members and p2Members
+          if (match.p1Members) {
+            match.p1Members.forEach(member => {
+              if (member.cagematchId && member.name) {
+                allWrestlers.set(member.cagematchId, { id: member.cagematchId, name: member.name, imageUrl: member.image });
+              }
+            });
+          }
+          if (match.p2Members) {
+            match.p2Members.forEach(member => {
+              if (member.cagematchId && member.name) {
+                allWrestlers.set(member.cagematchId, { id: member.cagematchId, name: member.name, imageUrl: member.image });
+              }
+            });
+          }
+          // Also extract from p1Image and p2Image URLs
+          if (match.p1Image && match.p1Image.includes('wrestler/')) {
+            const matchId = match.p1Image.match(/wrestler\/(\d+)/);
+            if (matchId && match.p1) {
+              allWrestlers.set(matchId[1], { id: matchId[1], name: match.p1, imageUrl: match.p1Image });
+            }
+          }
+          if (match.p2Image && match.p2Image.includes('wrestler/')) {
+            const matchId = match.p2Image.match(/wrestler\/(\d+)/);
+            if (matchId && match.p2) {
+              allWrestlers.set(matchId[1], { id: matchId[1], name: match.p2, imageUrl: match.p2Image });
+            }
+          }
+        });
+      }
+    });
+    
+    console.log(`📊 Found ${allWrestlers.size} unique wrestlers across all events\n`);
+    
+    // Save wrestler images to Firestore (limit to first 50 to avoid too many requests)
+    if (db && allWrestlers.size > 0) {
+      console.log('💾 Saving wrestler images to Firestore...\n');
+      let savedCount = 0;
+      const wrestlersArray = Array.from(allWrestlers.values()).slice(0, 50);
+      
+      for (const wrestler of wrestlersArray) {
+        try {
+          // Save the image URL we already have from matches
+          if (wrestler.imageUrl) {
+            await saveImageToFirestore('wrestlers', wrestler.name, wrestler.imageUrl);
+            savedCount++;
+          }
+          // Optionally scrape better image from wrestler profile (commented out to avoid too many requests)
+          // await scrapeWrestlerImage(wrestler.id, wrestler.name);
+        } catch (error) {
+          console.log(`   ⚠️  Error saving image for ${wrestler.name}:`, error.message);
+        }
+      }
+      console.log(`✅ Saved ${savedCount} wrestler images to Firestore\n`);
     }
     
     console.log('\n✅ Scraping complete!');

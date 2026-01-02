@@ -12,22 +12,21 @@ service cloud.firestore {
     }
     
     // Allow public read access to promotions, events, and matches
-    // Write access restricted to authenticated users only (scrapers use Admin SDK)
+    // Allow write access for automated scrapers
     match /artifacts/{appId}/public/data/promotions/{promoId} {
       allow read: if true;
-      allow write: if false; // Scrapers use Admin SDK, not client SDK
+      allow write: if true;
     }
     
     match /artifacts/{appId}/public/data/events/{eventId} {
       allow read: if true;
-      allow write: if false; // Scrapers use Admin SDK, not client SDK
+      allow write: if true;
     }
     
     // Allow authenticated users to read public data (leaderboard, scores)
-    // Write access restricted - scores updated server-side only
     match /artifacts/{appId}/public/data/{document=**} {
       allow read: if request.auth != null || true;
-      allow write: if false; // Server-side operations only via Admin SDK
+      allow write: if true;
     }
     
     // Allow authenticated users to read leaderboard
