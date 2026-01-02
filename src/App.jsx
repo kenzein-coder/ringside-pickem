@@ -1571,22 +1571,9 @@ export default function RingsidePickemFinal() {
       const previousUserId = previousUserIdRef.current;
       const newUserId = user?.uid;
       
-      console.log('🔄 USER CHANGED: Clearing ALL predictions state', {
-        previousUserId,
-        newUserId,
-        timestamp: new Date().toISOString()
-      });
-      
       // CRITICAL: Clear ALL predictionsByUser when user changes to prevent cross-contamination
       // This ensures no data from the previous user can leak to the new user
       setPredictionsByUser(prev => {
-        if (Object.keys(prev).length > 0) {
-          console.log('🧹 Clearing predictionsByUser on user change:', {
-            previousUserId,
-            newUserId,
-            clearedUserKeys: Object.keys(prev)
-          });
-        }
         return {}; // Complete reset
       });
       
@@ -1608,11 +1595,6 @@ export default function RingsidePickemFinal() {
     
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       // Clear all user data when auth state changes
-      console.log('🔄 AUTH STATE CHANGED:', {
-        previousUserId: currentUserIdRef.current,
-        newUserId: currentUser?.uid,
-        timestamp: new Date().toISOString()
-      });
       currentUserIdRef.current = null;
       // CRITICAL: Clear predictionsByUser on auth change to prevent cross-contamination
       setPredictionsByUser({});
@@ -1670,8 +1652,6 @@ export default function RingsidePickemFinal() {
     setCommunitySentiment({});
     setSelectedMethod({});
     setPredictionsUserId(null);
-    
-    console.log('🔄 Setting up listener for user:', user.uid);
 
     const unsubProfile = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), (snap) => {
         if(snap.exists()) {
@@ -1694,11 +1674,6 @@ export default function RingsidePickemFinal() {
     let isListenerValid = true;
     
     const predictionsPath = `artifacts/${appId}/users/${currentUserId}/predictions`;
-    console.log('🔍 SETTING UP PREDICTIONS LISTENER:', {
-      userId: currentUserId,
-      path: predictionsPath,
-      timestamp: new Date().toISOString()
-    });
     
     const unsubPreds = onSnapshot(
       collection(db, 'artifacts', appId, 'users', currentUserId, 'predictions'), 
@@ -1706,26 +1681,17 @@ export default function RingsidePickemFinal() {
         // CRITICAL: Multiple checks to prevent stale predictions
         // 1. Check if listener is still valid
         if (!isListenerValid) {
-          console.log('🔒 Listener invalidated, ignoring update');
           return;
         }
         
         // 2. Check if this listener's user ID still matches the current user
         if (listenerUserIdRef.current !== currentUserId) {
-          console.log('🔒 Listener user ID mismatch, invalidating', {
-            listenerUserId: listenerUserIdRef.current,
-            expectedUserId: currentUserId
-          });
           isListenerValid = false;
           return;
         }
         
         // 3. Check if the global current user ref has changed
         if (currentUserIdRef.current !== currentUserId) {
-          console.log('🔒 Global user ref changed, invalidating', {
-            globalRef: currentUserIdRef.current,
-            expectedUserId: currentUserId
-          });
           isListenerValid = false;
           return;
         }
@@ -1747,15 +1713,6 @@ export default function RingsidePickemFinal() {
         }
         
         // All checks passed - this is a valid update for the current user
-        console.log('✅ FIRESTORE LISTENER FIRED - Loading predictions for user:', currentUserId, {
-          path: predictionsPath,
-          docCount: snap.size,
-          docIds: snap.docs.map(d => d.id),
-          listenerUserId: listenerUserIdRef.current,
-          globalRef: currentUserIdRef.current,
-          timestamp: new Date().toISOString()
-        });
-        
         // CRITICAL: Verify each document belongs to this user by checking the path
         // Firestore collection listeners should only return docs from the specified collection,
         // but we'll add extra validation just in case
@@ -1789,7 +1746,6 @@ export default function RingsidePickemFinal() {
         });
         
         if (Object.keys(preds).length === 0) {
-          console.log('📭 No predictions found for user:', currentUserId);
           // Set empty predictions for this user in the keyed structure
           setPredictionsByUser(prev => {
             // Final safety check
@@ -1805,11 +1761,6 @@ export default function RingsidePickemFinal() {
         } else {
           // Note: predictionsByUser might be empty here because we're reading it before the state update
           // This is expected - the state will be updated in the setPredictionsByUser call below
-          console.log('📥 Loaded predictions for user:', currentUserId, {
-            eventCount: Object.keys(preds).length,
-            events: Object.keys(preds)
-          });
-          
           // CRITICAL: Store predictions keyed by user ID - this prevents cross-contamination
           setPredictionsByUser(prev => {
             // Final safety check - only update if user hasn't changed
@@ -1830,16 +1781,10 @@ export default function RingsidePickemFinal() {
                 eventCount: Object.keys(preds).length
               });
               // Clear all other users' predictions before storing this user's
-              console.log('🧹 Clearing other users\' predictions to prevent cross-contamination');
               return {
                 [currentUserId]: preds
               };
             }
-            
-            console.log('✅ Storing predictions for user:', currentUserId, {
-              eventCount: Object.keys(preds).length,
-              previousUserKeys: previousUserKeys
-            });
             
             // Store predictions under the user's ID
             return {
@@ -1859,7 +1804,6 @@ export default function RingsidePickemFinal() {
     );
     
     const cleanupPredictions = () => {
-      console.log('🧹 CLEANING UP predictions listener for user:', currentUserId);
       // Invalidate listener immediately
       isListenerValid = false;
       listenerUserIdRef.current = null;
@@ -1869,9 +1813,6 @@ export default function RingsidePickemFinal() {
       setPredictionsByUser(prev => {
         const updated = { ...prev };
         delete updated[currentUserId];
-        console.log('🧹 Removed predictions for user:', currentUserId, {
-          remainingUsers: Object.keys(updated)
-        });
         return updated;
       });
       setPredictionsUserId(null);
@@ -1959,10 +1900,6 @@ export default function RingsidePickemFinal() {
   // Additional safety: Clear predictionsUserId if user changes while in dashboard
   useEffect(() => {
     if (viewState === 'dashboard' && user?.uid && predictionsUserId !== null && predictionsUserId !== user.uid) {
-      console.error('🔒 CRITICAL: User changed but predictionsUserId not updated! Resetting.', {
-        predictionsUserId,
-        currentUserId: user.uid
-      });
       // Don't clear predictionsByUser - it's keyed by user ID
       setPredictionsUserId(null);
     }
@@ -2353,10 +2290,7 @@ export default function RingsidePickemFinal() {
     }
     
     // 3. Final check - verify predictionsUserId is set (means listener is active for this user)
-    if (predictionsUserId === null) {
-      console.warn('⚠️ Warning: predictionsUserId is null - predictions listener may not be active yet');
-      // Don't block, but log a warning
-    }
+    // Note: predictionsUserId may be null initially, which is acceptable
     
     // CRITICAL: Get current user's predictions from keyed structure
     // Use user.uid directly (it's fresh from the function parameter validation)
@@ -2375,21 +2309,6 @@ export default function RingsidePickemFinal() {
     
     // CRITICAL: Always use user.uid from the user object, never from state
     const predictionPath = `artifacts/${appId}/users/${user.uid}/predictions/${eventId}`;
-    
-    console.log('💾 SAVING PREDICTION:', {
-      userId: user.uid,
-      eventId,
-      matchId: normalizedMatchId,
-      winner,
-      method,
-      path: predictionPath,
-      fullPath: `artifacts/${appId}/users/${user.uid}/predictions/${eventId}`,
-      validationChecks: {
-        predictionsUserIdMatch: predictionsUserId === user.uid,
-        refMatch: currentUserIdRef.current === user.uid
-      },
-      timestamp: new Date().toISOString()
-    });
     
     // CRITICAL: Don't save __ownerId or __timestamp to Firestore - they're only for in-memory state
     // newPreds only contains the actual prediction data, so it's safe to save
@@ -3207,37 +3126,24 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                 const getMyPickData = () => {
                   // CRITICAL: Verify user ID matches before accessing predictions
                   if (!currentUserUid) {
-                    console.log('🔒 No current user - blocking prediction access');
                     return undefined;
                   }
                   
                   if (predictionsUserId !== currentUserUid) {
-                    console.error('🔒 USER ISOLATION VIOLATION: predictionsUserId mismatch!', {
-                      predictionsUserId,
-                      currentUserId: currentUserUid,
-                      refUserId: currentUserIdRef.current,
-                      userObjectUid: user?.uid,
-                      eventId: selectedEvent.id,
-                      matchId: match.id,
-                      timestamp: new Date().toISOString()
-                    });
+                    if (process.env.NODE_ENV === 'development') {
+                      console.error('🔒 USER ISOLATION VIOLATION: predictionsUserId mismatch!');
+                    }
                     return undefined;
                   }
                   
                   if (predictionsUserId === null) {
-                    console.log('🔒 predictionsUserId is null - predictions not loaded yet');
                     return undefined;
                   }
                   
                   if (currentUserIdRef.current !== currentUserUid) {
-                    console.error('🔒 USER ISOLATION VIOLATION: currentUserIdRef mismatch!', {
-                      predictionsUserId,
-                      currentUserId: currentUserUid,
-                      refUserId: currentUserIdRef.current,
-                      userObjectUid: user?.uid,
-                      eventId: selectedEvent.id,
-                      matchId: match.id
-                    });
+                    if (process.env.NODE_ENV === 'development') {
+                      console.error('🔒 USER ISOLATION VIOLATION: currentUserIdRef mismatch!');
+                    }
                     return undefined;
                   }
                   
@@ -3248,18 +3154,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                   const userPredictions = predictionsByUser[currentUserUid] || {};
                   const pickData = userPredictions[selectedEvent.id]?.[matchIdStr];
                   
-                  // Only log if there's a potential issue
-                  if (pickData && process.env.NODE_ENV === 'development') {
-                    const predictionsByUserKeys = Object.keys(predictionsByUser);
-                    if (predictionsByUserKeys.length > 1) {
-                      console.warn('⚠️ Multiple users in predictionsByUser:', {
-                        currentUserUid,
-                        allUserKeys: predictionsByUserKeys,
-                        eventId: selectedEvent.id,
-                        matchId: matchIdStr
-                      });
-                    }
-                  }
+                  // Note: Multiple users in predictionsByUser is expected during user transitions
                   
                   return pickData;
                 };
@@ -3271,14 +3166,9 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                   currentUserUid !== null &&
                   currentUserIdRef.current === currentUserUid;
                 
-                // Only log warnings, not every render
-                if (predictionsUserId !== null && !predictionsBelongToCurrentUser) {
-                  console.error('🔒 BLOCKING predictions display - user mismatch', {
-                    predictionsUserId,
-                    currentUserId: currentUserUid,
-                    refUserId: currentUserIdRef.current,
-                    eventId: selectedEvent.id
-                  });
+                // Validate predictions belong to current user
+                if (predictionsUserId !== null && !predictionsBelongToCurrentUser && process.env.NODE_ENV === 'development') {
+                  console.error('🔒 BLOCKING predictions display - user mismatch');
                 }
                 
                 // CRITICAL: Use the safe getter function that checks user ID every time
@@ -3287,21 +3177,18 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                 const myPickData = getMyPickData();
                 
                 // CRITICAL: Final validation - ensure we have a valid user and predictions belong to them
+                let myPick, myMethod;
                 if (myPickData && (!currentUserUid || predictionsUserId !== currentUserUid)) {
-                  console.error('🔒 CRITICAL: Blocking prediction display - user mismatch detected!', {
-                    hasPickData: !!myPickData,
-                    currentUserUid,
-                    predictionsUserId,
-                    matchId: matchIdStr,
-                    eventId: selectedEvent.id
-                  });
+                  if (process.env.NODE_ENV === 'development') {
+                    console.error('🔒 CRITICAL: Blocking prediction display - user mismatch detected!');
+                  }
                   // Force undefined to prevent showing wrong user's predictions
-                  var myPick = undefined;
-                  var myMethod = null;
+                  myPick = undefined;
+                  myMethod = null;
                 } else {
                   // Handle both old format (string) and new format (object)
-                  var myPick = myPickData ? (typeof myPickData === 'string' ? myPickData : (myPickData?.winner || myPickData)) : undefined;
-                  var myMethod = myPickData && typeof myPickData === 'object' ? myPickData?.method : null;
+                  myPick = myPickData ? (typeof myPickData === 'string' ? myPickData : (myPickData?.winner || myPickData)) : undefined;
+                  myMethod = myPickData && typeof myPickData === 'object' ? myPickData?.method : null;
                 }
                 // FIXED: Use string key consistently
                 // For past events, check if match has a winner field from scraper
