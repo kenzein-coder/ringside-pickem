@@ -868,85 +868,8 @@ const searchWrestlerImage = async (wrestlerName) => {
     // Silently fail
   }
   
-  // Try Wikipedia API search with more variations
-  try {
-    // Try different variations of the wrestler name
-    const nameVariations = [
-      wrestlerName,
-      wrestlerName.replace(/\./g, ''), // Remove periods
-      wrestlerName.replace(/\./g, '').trim(), // Remove periods and trim
-      wrestlerName.split(' ').join('_'), // Replace spaces with underscores
-      wrestlerName.split(' ').join('_').replace(/\./g, ''), // Underscores + no periods
-      `${wrestlerName} (wrestler)`,
-      `${wrestlerName.replace(/\./g, '')} (wrestler)`,
-      `${wrestlerName} (professional wrestler)`,
-      // Try with common ring name variations
-      wrestlerName.includes('Jr.') ? wrestlerName.replace('Jr.', 'Junior') : null,
-      wrestlerName.includes('Jr') ? wrestlerName.replace('Jr', 'Junior') : null,
-      wrestlerName.includes('Jr.') ? wrestlerName.replace('Jr.', 'Jr') : null,
-    ].filter(Boolean); // Remove null values
-    
-    for (const nameVar of nameVariations) {
-      try {
-        const apiUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(nameVar)}`;
-        const response = await fetch(apiUrl);
-        if (!response.ok) continue;
-        
-        const data = await response.json();
-        
-        if (data.thumbnail?.source) {
-          const imageUrl = data.thumbnail.source;
-          saveImageToFirestore('wrestlers', wrestlerName, imageUrl);
-          return imageUrl;
-        }
-      } catch (e) {
-        continue;
-      }
-    }
-  } catch (error) {
-    console.log(`Wikipedia API search failed for ${wrestlerName}`);
-  }
-  
-  // Try Wikipedia infobox extraction
-  try {
-    const nameVariations = [
-      wrestlerName,
-      wrestlerName.replace(/\./g, ''),
-      `${wrestlerName} (wrestler)`,
-      `${wrestlerName.replace(/\./g, '')} (wrestler)`,
-    ];
-    
-    for (const nameVar of nameVariations) {
-      const infoboxImage = await searchWikipediaInfobox(nameVar);
-      if (infoboxImage) {
-        // Upload to Storage in background
-        downloadAndUploadImage(infoboxImage, 'wrestlers', wrestlerName).then((storageUrl) => {
-          if (storageUrl) {
-            saveImageToFirestore('wrestlers', wrestlerName, storageUrl);
-          } else {
-            saveImageToFirestore('wrestlers', wrestlerName, infoboxImage);
-          }
-        }).catch(() => {
-          saveImageToFirestore('wrestlers', wrestlerName, infoboxImage);
-        });
-        return infoboxImage;
-      }
-    }
-  } catch (error) {
-    // Silently fail
-  }
-  
-  // Additional backup: Try Unsplash (as last resort)
-  try {
-    const unsplashUrl = await searchUnsplashImage(wrestlerName);
-    if (unsplashUrl) {
-      // Note: Unsplash results may not be accurate, but it's a backup
-      saveImageToFirestore('wrestlers', wrestlerName, unsplashUrl);
-      return unsplashUrl;
-    }
-  } catch (error) {
-    // Silently fail
-  }
+  // Skip Wikipedia/Wikimedia search per user request
+  // (Hardcoded Wikimedia images are still used, but downloaded to Storage)
   
   return null;
 };
@@ -1515,7 +1438,8 @@ const BrandLogo = ({ id, className = "w-full h-full object-contain", logoUrl }) 
 };
 
 const WrestlerImage = ({ name, className, imageUrl }) => {
-  // Helper to check hardcoded images synchronously (skip Wikimedia/Cagematch)
+  // Helper to check hardcoded images synchronously
+  // Note: We allow Wikimedia URLs from hardcoded images, but we'll download them to Storage
   const getHardcodedImage = (wrestlerName) => {
     let url = null;
     // First try exact match
@@ -1532,13 +1456,9 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
       }
     }
     
-    // Skip Wikimedia/Wikipedia and Cagematch URLs
-    if (url && (
-      url.includes('wikimedia.org') || 
-      url.includes('wikipedia.org') || 
-      url.includes('cagematch.net')
-    )) {
-      return null; // Don't use these sources
+    // Skip Cagematch URLs (but allow Wikimedia - we'll download to Storage)
+    if (url && url.includes('cagematch.net')) {
+      return null; // Don't use Cagematch
     }
     return url;
   };
@@ -1569,7 +1489,7 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
       // But check again in case name changed
       const hardcodedUrl = getHardcodedImage(name);
       if (hardcodedUrl) {
-        // First check if we have it in Storage
+        // First check if we have it in Storage (this works for both Wikimedia and non-Wikimedia images)
         try {
           const storageUrl = await getImageFromStorage('wrestlers', name);
           if (storageUrl) {
@@ -1581,14 +1501,29 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
           // Not in Storage, continue
         }
         
-        // If not in Storage, use hardcoded URL (already proxied if needed by getHardcodedImage)
-        setCurrentImageUrl(hardcodedUrl);
-        setImageSource(hardcodedUrl.includes('wsrv.nl') || hardcodedUrl.includes('weserv.nl') ? 'proxy' : 'initial');
+        // If not in Storage, use hardcoded URL
+        // For Wikimedia URLs, we'll use them directly (they're reliable) and download to Storage in background
+        // For other URLs, proxy if needed
+        let urlToUse = hardcodedUrl;
+        let sourceType = 'initial';
+        
+        // If it's a Wikimedia URL, use it directly (they're reliable and public domain)
+        // Otherwise, proxy external URLs
+        if (!hardcodedUrl.includes('wikimedia.org') && !hardcodedUrl.includes('wikipedia.org')) {
+          if (hardcodedUrl.startsWith('http://') || hardcodedUrl.startsWith('https://')) {
+            urlToUse = getProxiedImageUrl(hardcodedUrl, 400, 500, 'wsrv');
+            sourceType = 'proxy';
+          }
+        }
+        
+        setCurrentImageUrl(urlToUse);
+        setImageSource(sourceType);
         
         // Download and upload to Storage in the background (non-blocking)
+        // This works for both Wikimedia and non-Wikimedia images
         downloadAndUploadImage(hardcodedUrl, 'wrestlers', name).then((storageUrl) => {
           if (storageUrl) {
-            // Update to use Storage URL once uploaded
+            // Update to use Storage URL once uploaded (this is the preferred source)
             setCurrentImageUrl(storageUrl);
             setImageSource('database');
           }
