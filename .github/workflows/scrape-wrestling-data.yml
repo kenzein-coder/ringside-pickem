@@ -1,0 +1,67 @@
+cd /Users/zelzein/Desktop/ringside-pickem/ringside-pickem && echo "=== WORKFLOW FILE ===" && cat .github/workflows/scrape-wrestling-data.yml
+
+=== WORKFLOW FILE ===
+name: Scrape Wrestling Data
+
+on:
+  # Run automatically every day at 6 AM UTC (1 AM EST / 10 PM PST)
+  schedule:
+    - cron: '0 6 * * *'
+  
+  # Allow manual trigger from GitHub Actions tab
+  workflow_dispatch:
+  
+  # Run when scraper file is updated
+  push:
+    paths:
+      - 'scripts/scrape-cagematch.js'
+      - '.github/workflows/scrape-wrestling-data.yml'
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Create data directory
+        run: mkdir -p data
+      
+      - name: Setup Firebase Service Account
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > serviceAccountKey.json
+          chmod 600 serviceAccountKey.json
+      
+      - name: Run scraper
+        run: node scripts/scrape-cagematch.js
+        env:
+          NODE_ENV: production
+      
+      - name: Cleanup service account key
+        if: always()
+        run: rm -f serviceAccountKey.json
+      
+      - name: Upload scraped data as artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wrestling-data-${{ github.run_number }}
+          path: |
+            data/*.json
+          retention-days: 7
+      
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Scraper failed! Check the logs above."
+          exit 1
