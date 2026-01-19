@@ -1975,6 +1975,8 @@ export default function RingsidePickemFinal() {
   const [selectedMethod, setSelectedMethod] = useState({}); // { eventId-matchId: 'pinfall' }
   const [predictionsUserId, setPredictionsUserId] = useState(null); // Track which user's predictions we're showing
   const [eventTypeFilter, setEventTypeFilter] = useState('ppv'); // 'ppv', 'weekly', or 'past'
+  const [customInputMode, setCustomInputMode] = useState({}); // Track which rumble matches are using custom input: { matchId: boolean }
+  const [customInputText, setCustomInputText] = useState({}); // Track custom input text: { matchId: string }
   
   // Use ref to track current user ID - this won't cause re-renders and is always current
   const currentUserIdRef = useRef(null);
@@ -3562,38 +3564,113 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                       const totalParticipants = allParticipants?.length || ((match.p1Members?.length || 1) + (match.p2Members?.length || 1));
                       const isLargeMultiMan = totalParticipants > 6;
                       
-                      // Rumble/Battle Royal - Dropdown selector
+                      // Rumble/Battle Royal - Dropdown selector OR free-text input
                       if (isRumble) {
                         const participants = allParticipants || [
                           { name: match.p1, image: match.p1Image },
                           { name: match.p2, image: match.p2Image }
                         ];
+                        
+                        const useCustomInput = customInputMode[match.id] || false;
+                        const customPrediction = customInputText[match.id] || '';
+                        
                         return (
                           <div className="bg-slate-900/50 rounded-2xl border border-slate-800 p-4">
                             <div className="text-center mb-4">
                               <Users className="inline-block text-yellow-500 mb-2" size={32} />
-                              <p className="text-xs text-slate-400">Select your winner from the participants</p>
+                              <p className="text-xs text-slate-400">
+                                {useCustomInput ? 'Type your prediction for the winner' : 'Select from known participants or type your own'}
+                              </p>
                             </div>
-                            <select
-                              value={myPick || ''}
-                              onChange={(e) => !actualWinner && !lockedEvents[selectedEvent.id] && e.target.value && makePrediction(selectedEvent.id, match.id, e.target.value, 'last elimination')}
-                              disabled={!!actualWinner || !!lockedEvents[selectedEvent.id]}
-                              className="w-full bg-slate-950 border border-slate-700 text-white px-4 py-3 rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
-                            >
-                              <option value="">-- Select Winner --</option>
-                              {participants.map((p, idx) => (
-                                <option key={idx} value={p.name}>{p.name}</option>
-                              ))}
-                            </select>
+                            
+                            {!useCustomInput ? (
+                              <>
+                                <select
+                                  value={myPick || ''}
+                                  onChange={(e) => !actualWinner && !lockedEvents[selectedEvent.id] && e.target.value && makePrediction(selectedEvent.id, match.id, e.target.value, 'last elimination')}
+                                  disabled={!!actualWinner || !!lockedEvents[selectedEvent.id]}
+                                  className="w-full bg-slate-950 border border-slate-700 text-white px-4 py-3 rounded-xl text-sm font-bold focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
+                                >
+                                  <option value="">-- Select Winner --</option>
+                                  {participants.map((p, idx) => (
+                                    <option key={idx} value={p.name}>{p.name}</option>
+                                  ))}
+                                </select>
+                                <button
+                                  onClick={() => setCustomInputMode({ ...customInputMode, [match.id]: true })}
+                                  disabled={!!actualWinner || !!lockedEvents[selectedEvent.id]}
+                                  className="mt-2 w-full text-xs text-cyan-400 hover:text-cyan-300 font-bold py-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  💭 Or type your own prediction (for surprise entrants)
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <input
+                                  type="text"
+                                  value={customPrediction}
+                                  onChange={(e) => setCustomInputText({ ...customInputText, [match.id]: e.target.value })}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && customPrediction.trim()) {
+                                      makePrediction(selectedEvent.id, match.id, customPrediction.trim(), 'last elimination');
+                                      setCustomInputText({ ...customInputText, [match.id]: '' });
+                                      setCustomInputMode({ ...customInputMode, [match.id]: false });
+                                    }
+                                  }}
+                                  disabled={!!actualWinner || !!lockedEvents[selectedEvent.id]}
+                                  placeholder="Type wrestler name..."
+                                  className="w-full bg-slate-950 border border-slate-700 text-white px-4 py-3 rounded-xl text-sm font-bold placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
+                                  autoFocus
+                                />
+                                <div className="flex gap-2 mt-2">
+                                  <button
+                                    onClick={() => {
+                                      if (customPrediction.trim()) {
+                                        makePrediction(selectedEvent.id, match.id, customPrediction.trim(), 'last elimination');
+                                        setCustomInputText({ ...customInputText, [match.id]: '' });
+                                        setCustomInputMode({ ...customInputMode, [match.id]: false });
+                                      }
+                                    }}
+                                    disabled={!customPrediction.trim() || !!actualWinner || !!lockedEvents[selectedEvent.id]}
+                                    className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-xl text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                  >
+                                    Submit Prediction
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setCustomInputMode({ ...customInputMode, [match.id]: false });
+                                      setCustomInputText({ ...customInputText, [match.id]: '' });
+                                    }}
+                                    disabled={!!actualWinner || !!lockedEvents[selectedEvent.id]}
+                                    className="px-4 text-xs text-slate-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                            
                             {myPick && (
                               <div className="mt-3 flex items-center justify-center gap-3 p-3 bg-slate-950/50 rounded-xl border border-red-900/30">
-                                <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-red-500">
-                                  <WrestlerImage name={myPick} className="w-full h-full" />
-                                </div>
-                                <div>
-                                  <span className="text-[8px] text-slate-500 uppercase font-bold">Your Pick</span>
-                                  <div className="text-white font-black uppercase">{myPick}</div>
-                                </div>
+                                {!participants.find(p => p.name === myPick) ? (
+                                  // Custom prediction - show text only
+                                  <div className="text-center">
+                                    <span className="text-[8px] text-slate-500 uppercase font-bold block mb-1">Your Pick</span>
+                                    <div className="text-white font-black uppercase">{myPick}</div>
+                                    <span className="text-[7px] text-cyan-400 mt-1 block">Custom Prediction</span>
+                                  </div>
+                                ) : (
+                                  // Known participant - show image
+                                  <>
+                                    <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-red-500">
+                                      <WrestlerImage name={myPick} className="w-full h-full" />
+                                    </div>
+                                    <div>
+                                      <span className="text-[8px] text-slate-500 uppercase font-bold">Your Pick</span>
+                                      <div className="text-white font-black uppercase">{myPick}</div>
+                                    </div>
+                                  </>
+                                )}
                               </div>
                             )}
                             {actualWinner && (

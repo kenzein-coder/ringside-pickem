@@ -11,8 +11,7 @@ import https from 'https';
 import { writeFileSync, readFileSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import admin from 'firebase-admin';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -20,43 +19,32 @@ const __dirname = dirname(__filename);
 // Rate limiting - be respectful (2 seconds between requests)
 const DELAY_MS = 2000;
 
-// Firebase initialization (optional - only if .env exists)
+// Firebase initialization (optional - only if service account exists)
 let db = null;
 let appId = 'default-app-id';
 
 function initFirebase() {
   try {
-    // Try to load environment variables
-    const envPath = join(__dirname, '../.env');
-    if (existsSync(envPath)) {
-      const envContent = readFileSync(envPath, 'utf-8');
-      const envVars = {};
-      envContent.split('\n').forEach(line => {
-        const match = line.match(/^([^#=]+)=(.+)$/);
-        if (match) {
-          envVars[match[1].trim()] = match[2].trim();
-        }
+    // Try to load service account key
+    const serviceAccountPath = join(__dirname, '../serviceAccountKey.json');
+    if (existsSync(serviceAccountPath)) {
+      const serviceAccount = JSON.parse(readFileSync(serviceAccountPath, 'utf-8'));
+      
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+        projectId: serviceAccount.project_id
       });
       
-      if (envVars.VITE_FIREBASE_API_KEY && envVars.VITE_FIREBASE_API_KEY !== 'AIzaSyD...') {
-        const firebaseConfig = {
-          apiKey: envVars.VITE_FIREBASE_API_KEY,
-          authDomain: envVars.VITE_FIREBASE_AUTH_DOMAIN,
-          projectId: envVars.VITE_FIREBASE_PROJECT_ID,
-          storageBucket: envVars.VITE_FIREBASE_STORAGE_BUCKET,
-          messagingSenderId: envVars.VITE_FIREBASE_MESSAGING_SENDER_ID,
-          appId: envVars.VITE_FIREBASE_APP_ID
-        };
-        
-        const app = initializeApp(firebaseConfig);
-        db = getFirestore(app);
-        appId = envVars.VITE_FIREBASE_PROJECT_ID || 'default-app-id';
-        console.log('✅ Firebase initialized\n');
-        return true;
-      }
+      db = admin.firestore();
+      appId = serviceAccount.project_id;
+      console.log('✅ Firebase Admin SDK initialized\n');
+      return true;
+    } else {
+      console.log('⚠️  Service account key not found at:', serviceAccountPath);
     }
   } catch (error) {
-    console.log('⚠️  Firebase not configured, saving to JSON files only\n');
+    console.log('⚠️  Firebase not configured:', error.message);
+    console.log('    Saving to JSON files only\n');
   }
   return false;
 }
@@ -217,14 +205,17 @@ async function scrapePromotions() {
       console.log('🔥 Saving promotions to Firestore...');
       for (const promo of majorPromotions) {
         try {
-          await setDoc(
-            doc(db, 'artifacts', appId, 'public', 'data', 'promotions', promo.id),
-            {
+          await db
+            .collection('artifacts')
+            .doc(appId)
+            .collection('public')
+            .doc('data')
+            .collection('promotions')
+            .doc(promo.id)
+            .set({
               ...promo,
               updatedAt: new Date().toISOString()
-            },
-            { merge: true }
-          );
+            }, { merge: true });
         } catch (error) {
           console.error(`  ⚠️  Error saving ${promo.name}:`, error.message);
         }
@@ -853,14 +844,21 @@ async function saveImageToFirestore(type, identifier, imageUrl) {
   if (!db || !appId || !imageUrl) return;
   
   try {
-    const imageDoc = doc(db, 'artifacts', appId, 'public', 'data', 'images', type);
-    const currentData = await getDoc(imageDoc);
-    const existingImages = currentData.exists() ? currentData.data() : {};
+    const imageDoc = db
+      .collection('artifacts')
+      .doc(appId)
+      .collection('public')
+      .doc('data')
+      .collection('images')
+      .doc(type);
     
-    await setDoc(imageDoc, {
+    const currentData = await imageDoc.get();
+    const existingImages = currentData.exists ? currentData.data() : {};
+    
+    await imageDoc.set({
       ...existingImages,
       [identifier]: imageUrl,
-      updatedAt: serverTimestamp()
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
   } catch (error) {
     console.log(`Failed to save image to Firestore (${type}/${identifier}):`, error.message);
@@ -1070,11 +1068,15 @@ async function main() {
           if (eventDetails.posterUrl) docData.posterUrl = eventDetails.posterUrl;
           if (eventDetails.slug) docData.slug = eventDetails.slug;
           
-          await setDoc(
-            doc(db, 'artifacts', appId, 'public', 'data', 'events', eventDetails.id),
-            docData,
-            { merge: true }
-          );
+          await db
+            .collection('artifacts')
+            .doc(appId)
+            .collection('public')
+            .doc('data')
+            .collection('events')
+            .doc(eventDetails.id)
+            .set(docData, { merge: true });
+          
           console.log(`  ✅ Saved ${eventDetails.name} to Firestore`);
         } catch (error) {
           console.error(`  ⚠️  Error saving ${eventDetails.name}:`, error.message);
