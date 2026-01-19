@@ -14,6 +14,7 @@
     "upload-images": "node scripts/upload-images-to-storage.js"
   },
   "dependencies": {
+    "@vercel/analytics": "^1.6.1",
     "clsx": "^2.1.0",
     "firebase": "^10.14.1",
     "lucide-react": "^0.344.0",
