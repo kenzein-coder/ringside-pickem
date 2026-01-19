@@ -72,6 +72,7 @@ import {
 } from 'lucide-react';
 import { validateDisplayName, isValidEmail, validatePassword, sanitizeString } from './utils/inputValidation.js';
 import { authRateLimiter, predictionRateLimiter } from './utils/rateLimiter.js';
+import { wrestlerNamesMatch } from './utils/wrestlerNameMatcher.js';
 
 // --- Firebase Configuration ---
 const firebaseConfig = {
@@ -2941,7 +2942,12 @@ export default function RingsidePickemFinal() {
         const pred = myPreds[matchId];
         // Handle both old format (string) and new format (object)
         const predictedWinner = typeof pred === 'string' ? pred : (pred?.winner || pred);
-        if (predictedWinner === results[matchId]) correctCount++; 
+        const actualWinner = results[matchId];
+        
+        // Use fuzzy matching for wrestler names (handles "Cody" vs "Cody Rhodes")
+        if (predictedWinner && actualWinner && wrestlerNamesMatch(predictedWinner, actualWinner)) {
+          correctCount++;
+        }
       });
       
       setUserProfile(prev => ({
@@ -3452,7 +3458,8 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                 // For past events, check if match has a winner field from scraper
                 // Otherwise use eventResults (for simulated/manually entered results)
                 const actualWinner = match.winner || eventResults[selectedEvent.id]?.[matchIdStr];
-                const isCorrect = actualWinner && myPick === actualWinner;
+                // Use fuzzy matching to check if prediction is correct (handles "Cody" vs "Cody Rhodes")
+                const isCorrect = actualWinner && myPick && wrestlerNamesMatch(myPick, actualWinner);
                 const sentiment = communitySentiment[selectedEvent.id]?.[matchIdStr];
                 const matchKey = `${selectedEvent.id}-${matchIdStr}`;
                 
@@ -3563,6 +3570,9 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                       const totalParticipants = allParticipants?.length || ((match.p1Members?.length || 1) + (match.p2Members?.length || 1));
                       const isLargeMultiMan = totalParticipants > 6;
                       
+                      // Helper function to check if a wrestler matches the actual winner (with fuzzy matching)
+                      const isWinner = (wrestlerName) => actualWinner && wrestlerNamesMatch(wrestlerName, actualWinner);
+                      
                       // Rumble/Battle Royal - Text input only
                       if (isRumble) {
                         const customPrediction = customInputText[match.id] || '';
@@ -3633,14 +3643,14 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                               <div 
                                 key={idx}
                                 onClick={() => !actualWinner && !lockedEvents[selectedEvent.id] && p.name !== 'TBD' && makePrediction(selectedEvent.id, match.id, p.name, selectedMethod[matchKey] || 'pinfall')} 
-                                className={`relative rounded-xl overflow-hidden transition-all duration-300 border ${lockedEvents[selectedEvent.id] ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-600'} ${myPick === p.name ? 'border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800'} ${actualWinner && actualWinner !== p.name ? 'grayscale opacity-50' : ''}`}
+                                className={`relative rounded-xl overflow-hidden transition-all duration-300 border ${lockedEvents[selectedEvent.id] ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-600'} ${myPick === p.name ? 'border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800'} ${actualWinner && !isWinner(p.name) ? 'grayscale opacity-50' : ''}`}
                               >
                                 <WrestlerImage name={p.name} className="w-full h-full" imageUrl={p.image} />
                                 <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent pt-8 pb-2 px-1 text-center">
                                   <span className={`block font-black text-xs uppercase leading-tight ${myPick === p.name ? 'text-red-500' : 'text-white'}`}>{p.name}</span>
                                   {myPick === p.name && <span className="text-[7px] font-bold bg-red-600 text-white px-1.5 py-0.5 rounded-full inline-block mt-1">PICK</span>}
                                 </div>
-                                {actualWinner === p.name && <div className="absolute top-1 left-1 bg-green-500 text-black text-[8px] font-black px-1.5 py-0.5 rounded uppercase shadow-lg z-20">Winner</div>}
+                                {isWinner(p.name) && <div className="absolute top-1 left-1 bg-green-500 text-black text-[8px] font-black px-1.5 py-0.5 rounded uppercase shadow-lg z-20">Winner</div>}
                               </div>
                             ))}
                           </div>
@@ -3661,14 +3671,14 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                               <div 
                                 key={idx}
                                 onClick={() => !actualWinner && !lockedEvents[selectedEvent.id] && p.name !== 'TBD' && makePrediction(selectedEvent.id, match.id, p.name, selectedMethod[matchKey] || 'pinfall')} 
-                                className={`relative rounded-xl overflow-hidden transition-all duration-300 border ${lockedEvents[selectedEvent.id] ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-600'} ${myPick === p.name ? 'border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800'} ${actualWinner && actualWinner !== p.name ? 'grayscale opacity-50' : ''}`}
+                                className={`relative rounded-xl overflow-hidden transition-all duration-300 border ${lockedEvents[selectedEvent.id] ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-600'} ${myPick === p.name ? 'border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800'} ${actualWinner && !isWinner(p.name) ? 'grayscale opacity-50' : ''}`}
                               >
                                 <WrestlerImage name={p.name} className="w-full h-full" imageUrl={p.image} />
                                 <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent pt-8 pb-2 px-1 text-center">
                                   <span className={`block font-black text-sm uppercase leading-tight ${myPick === p.name ? 'text-red-500' : 'text-white'}`}>{p.name}</span>
                                   {myPick === p.name && <span className="text-[7px] font-bold bg-red-600 text-white px-1.5 py-0.5 rounded-full inline-block mt-1">PICK</span>}
                                 </div>
-                                {actualWinner === p.name && <div className="absolute top-1 left-1 bg-green-500 text-black text-[8px] font-black px-1.5 py-0.5 rounded uppercase shadow-lg z-20">Winner</div>}
+                                {isWinner(p.name) && <div className="absolute top-1 left-1 bg-green-500 text-black text-[8px] font-black px-1.5 py-0.5 rounded uppercase shadow-lg z-20">Winner</div>}
                               </div>
                             ))}
                           </div>
@@ -3682,7 +3692,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                             {/* Team 1 */}
                             <div 
                               onClick={() => !actualWinner && !lockedEvents[selectedEvent.id] && makePrediction(selectedEvent.id, match.id, match.p1, selectedMethod[matchKey] || 'pinfall')} 
-                              className={`flex-1 relative rounded-xl overflow-hidden transition-all duration-300 border-2 ${lockedEvents[selectedEvent.id] ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-500'} ${myPick === match.p1 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)]' : 'border-slate-700'} ${actualWinner && actualWinner !== match.p1 ? 'grayscale opacity-50' : ''}`}
+                              className={`flex-1 relative rounded-xl overflow-hidden transition-all duration-300 border-2 ${lockedEvents[selectedEvent.id] ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-500'} ${myPick === match.p1 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)]' : 'border-slate-700'} ${actualWinner && !isWinner(match.p1) ? 'grayscale opacity-50' : ''}`}
                             >
                               <div className="bg-gradient-to-br from-blue-900/50 to-slate-900 p-3">
                                 <div className="flex flex-wrap justify-center gap-1 mb-2">
@@ -3706,7 +3716,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                                   {myPick === match.p1 && <span className="text-[8px] font-bold bg-red-600 text-white px-2 py-0.5 rounded-full inline-block mt-1">YOUR PICK</span>}
                                 </div>
                               </div>
-                              {actualWinner === match.p1 && <div className="absolute top-1 left-1 bg-green-500 text-black text-[8px] font-black px-1.5 py-0.5 rounded uppercase shadow-lg z-20">Winner</div>}
+                              {isWinner(match.p1) && <div className="absolute top-1 left-1 bg-green-500 text-black text-[8px] font-black px-1.5 py-0.5 rounded uppercase shadow-lg z-20">Winner</div>}
                             </div>
                             
                             <div className="flex items-center"><span className="text-slate-600 font-black text-sm">VS</span></div>
@@ -3714,7 +3724,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                             {/* Team 2 */}
                             <div 
                               onClick={() => !actualWinner && !lockedEvents[selectedEvent.id] && makePrediction(selectedEvent.id, match.id, match.p2, selectedMethod[matchKey] || 'pinfall')} 
-                              className={`flex-1 relative rounded-xl overflow-hidden transition-all duration-300 border-2 ${lockedEvents[selectedEvent.id] ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-500'} ${myPick === match.p2 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)]' : 'border-slate-700'} ${actualWinner && actualWinner !== match.p2 ? 'grayscale opacity-50' : ''}`}
+                              className={`flex-1 relative rounded-xl overflow-hidden transition-all duration-300 border-2 ${lockedEvents[selectedEvent.id] ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-500'} ${myPick === match.p2 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)]' : 'border-slate-700'} ${actualWinner && !isWinner(match.p2) ? 'grayscale opacity-50' : ''}`}
                             >
                               <div className="bg-gradient-to-br from-purple-900/50 to-slate-900 p-3">
                                 <div className="flex flex-wrap justify-center gap-1 mb-2">
@@ -3738,7 +3748,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                                   {myPick === match.p2 && <span className="text-[8px] font-bold bg-red-600 text-white px-2 py-0.5 rounded-full inline-block mt-1">YOUR PICK</span>}
                                 </div>
                               </div>
-                              {actualWinner === match.p2 && <div className="absolute top-1 right-1 bg-green-500 text-black text-[8px] font-black px-1.5 py-0.5 rounded uppercase shadow-lg z-20">Winner</div>}
+                              {isWinner(match.p2) && <div className="absolute top-1 right-1 bg-green-500 text-black text-[8px] font-black px-1.5 py-0.5 rounded uppercase shadow-lg z-20">Winner</div>}
                             </div>
                           </div>
                         );
@@ -3747,7 +3757,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                       // Default 1v1 or small tag team match
                       return (
                         <div className="flex gap-1 h-64"> 
-                          <div onClick={() => !actualWinner && !lockedEvents[selectedEvent.id] && makePrediction(selectedEvent.id, match.id, match.p1, selectedMethod[matchKey] || 'pinfall')} className={`flex-1 relative rounded-l-2xl overflow-hidden transition-all duration-300 border-y border-l ${lockedEvents[selectedEvent.id] ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-600'} ${myPick === match.p1 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800'} ${actualWinner && actualWinner !== match.p1 ? 'grayscale opacity-50' : ''}`}>
+                          <div onClick={() => !actualWinner && !lockedEvents[selectedEvent.id] && makePrediction(selectedEvent.id, match.id, match.p1, selectedMethod[matchKey] || 'pinfall')} className={`flex-1 relative rounded-l-2xl overflow-hidden transition-all duration-300 border-y border-l ${lockedEvents[selectedEvent.id] ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-600'} ${myPick === match.p1 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800'} ${actualWinner && !isWinner(match.p1) ? 'grayscale opacity-50' : ''}`}>
                              {match.p1Members && match.p1Members.length === 2 ? (
                                <div className="w-full h-full grid grid-cols-2 gap-0.5">
                                  {match.p1Members.map((member, idx) => (
@@ -3762,10 +3772,10 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                                {myPick === match.p1 && <span className="text-[8px] font-bold bg-red-600 text-white px-2 py-0.5 rounded-full inline-block mt-1">YOUR PICK</span>}
                                {sentiment && sentiment.p1 >= 55 && <div className="text-[8px] text-cyan-400 font-bold mt-1 bg-cyan-950/50 px-2 py-0.5 rounded-full inline-block">🔥 {sentiment.p1}% pick</div>}
                              </div>
-                             {actualWinner === match.p1 && <div className="absolute top-2 left-2 bg-green-500 text-black text-[10px] font-black px-2 py-1 rounded uppercase shadow-lg z-20">Winner</div>}
+                             {isWinner(match.p1) && <div className="absolute top-2 left-2 bg-green-500 text-black text-[10px] font-black px-2 py-1 rounded uppercase shadow-lg z-20">Winner</div>}
                           </div>
                           <div className="w-1 bg-slate-900 flex items-center justify-center relative z-20"><div className="absolute bg-slate-950 border border-slate-700 rounded-full w-8 h-8 flex items-center justify-center text-[10px] font-black text-slate-500 italic shadow-xl">VS</div></div>
-                          <div onClick={() => !actualWinner && !lockedEvents[selectedEvent.id] && makePrediction(selectedEvent.id, match.id, match.p2, selectedMethod[matchKey] || 'pinfall')} className={`flex-1 relative rounded-r-2xl overflow-hidden transition-all duration-300 border-y border-r ${lockedEvents[selectedEvent.id] ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-600'} ${myPick === match.p2 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800'} ${actualWinner && actualWinner !== match.p2 ? 'grayscale opacity-50' : ''}`}>
+                          <div onClick={() => !actualWinner && !lockedEvents[selectedEvent.id] && makePrediction(selectedEvent.id, match.id, match.p2, selectedMethod[matchKey] || 'pinfall')} className={`flex-1 relative rounded-r-2xl overflow-hidden transition-all duration-300 border-y border-r ${lockedEvents[selectedEvent.id] ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-600'} ${myPick === match.p2 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800'} ${actualWinner && !isWinner(match.p2) ? 'grayscale opacity-50' : ''}`}>
                              {match.p2Members && match.p2Members.length === 2 ? (
                                <div className="w-full h-full grid grid-cols-2 gap-0.5">
                                  {match.p2Members.map((member, idx) => (
@@ -3780,7 +3790,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                                {myPick === match.p2 && <span className="text-[8px] font-bold bg-red-600 text-white px-2 py-0.5 rounded-full inline-block mt-1">YOUR PICK</span>}
                                {sentiment && sentiment.p2 >= 55 && <div className="text-[8px] text-amber-400 font-bold mt-1 bg-amber-950/50 px-2 py-0.5 rounded-full inline-block">🔥 {sentiment.p2}% pick</div>}
                              </div>
-                             {actualWinner === match.p2 && <div className="absolute top-2 right-2 bg-green-500 text-black text-[10px] font-black px-2 py-1 rounded uppercase shadow-lg z-20">Winner</div>}
+                             {isWinner(match.p2) && <div className="absolute top-2 right-2 bg-green-500 text-black text-[10px] font-black px-2 py-1 rounded uppercase shadow-lg z-20">Winner</div>}
                           </div>
                         </div>
                       );
