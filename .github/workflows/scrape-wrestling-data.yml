@@ -1,17 +1,9 @@
-cd /Users/zelzein/Desktop/ringside-pickem/ringside-pickem && echo "=== WORKFLOW FILE ===" && cat .github/workflows/scrape-wrestling-data.yml
-
-=== WORKFLOW FILE ===
 name: Scrape Wrestling Data
 
 on:
-  # Run automatically every day at 6 AM UTC (1 AM EST / 10 PM PST)
   schedule:
     - cron: '0 6 * * *'
-  
-  # Allow manual trigger from GitHub Actions tab
   workflow_dispatch:
-  
-  # Run when scraper file is updated
   push:
     paths:
       - 'scripts/scrape-cagematch.js'
@@ -63,5 +55,5 @@ jobs:
       - name: Notify on failure
         if: failure()
         run: |
-          echo "❌ Scraper failed! Check the logs above."
+          echo "Scraper failed! Check the logs above."
           exit 1
