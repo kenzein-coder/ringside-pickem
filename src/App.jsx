@@ -1,5 +1,13 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
 import { initializeApp } from 'firebase/app';
+// Lazy-loaded components for code splitting
+const LoginView = lazy(() => import('./components/auth/LoginView'));
+const OnboardingFlow = lazy(() => import('./components/auth/OnboardingFlow'));
+const SettingsPanel = lazy(() => import('./components/views/SettingsPanel'));
+const LeaderboardView = lazy(() => import('./components/views/LeaderboardView'));
+// UI components (keep eager - they're small)
+import Toggle from './components/ui/Toggle';
+import LoadingSpinner from './components/ui/LoadingSpinner';
 import { 
   getAuth, 
   signInAnonymously, 
@@ -62,6 +70,8 @@ import {
   Tv,
   Clock
 } from 'lucide-react';
+import { validateDisplayName, isValidEmail, validatePassword, sanitizeString } from './utils/inputValidation.js';
+import { authRateLimiter, predictionRateLimiter } from './utils/rateLimiter.js';
 
 // --- Firebase Configuration ---
 const firebaseConfig = {
@@ -1865,12 +1875,6 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
   );
 };
 
-const Toggle = ({ enabled, onClick }) => (
-  <div onClick={onClick} className={`w-12 h-6 rounded-full p-1 cursor-pointer transition-colors duration-200 ${enabled ? 'bg-red-600' : 'bg-slate-700'}`}>
-    <div className={`bg-white w-4 h-4 rounded-full shadow-md transform duration-200 ${enabled ? 'translate-x-6' : 'translate-x-0'}`} />
-  </div>
-);
-
 // Event Banner/Poster Component - handles loading event images with fallbacks
 const EventBanner = ({ event, className = "w-full h-full object-cover", fallbackClassName }) => {
   const [currentImageUrl, setCurrentImageUrl] = useState(null);
@@ -2392,10 +2396,19 @@ export default function RingsidePickemFinal() {
   // --- HANDLERS ---
 
   const handleGuestLogin = async () => {
+      // Rate limiting check
+      if (!authRateLimiter.isAllowed('guest-login')) {
+        const waitTime = Math.ceil(authRateLimiter.getTimeUntilNext('guest-login') / 1000);
+        setLoginError(`Too many login attempts. Please wait ${waitTime} seconds.`);
+        return;
+      }
+      
       setIsLoggingIn(true);
       setLoginError(null);
       try {
+          // eslint-disable-next-line no-undef
           if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+             // eslint-disable-next-line no-undef
              await signInWithCustomToken(auth, __initial_auth_token);
           } else {
              await signInAnonymously(auth);
@@ -2415,23 +2428,44 @@ export default function RingsidePickemFinal() {
   };
 
   const handleEmailSignUp = async () => {
+    // Rate limiting check
+    if (!authRateLimiter.isAllowed('email-signup')) {
+      const waitTime = Math.ceil(authRateLimiter.getTimeUntilNext('email-signup') / 1000);
+      setLoginError(`Too many signup attempts. Please wait ${waitTime} seconds.`);
+      return;
+    }
+    
+    // Input validation
     if (!email.trim() || !password.trim()) {
       setLoginError('Please fill in email and password');
       return;
     }
-    if (password.length < 6) {
-      setLoginError('Password must be at least 6 characters');
+    
+    // Validate email format
+    if (!isValidEmail(email)) {
+      setLoginError('Please enter a valid email address');
       return;
     }
+    
+    // Validate password
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.isValid) {
+      setLoginError(passwordValidation.errors[0]);
+      return;
+    }
+    
     if (password !== confirmPassword) {
       setLoginError('Passwords do not match');
       return;
     }
+    
+    // Sanitize email
+    const sanitizedEmail = sanitizeString(email.trim().toLowerCase());
 
     setIsLoggingIn(true);
     setLoginError(null);
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const userCredential = await createUserWithEmailAndPassword(auth, sanitizedEmail, password);
       // Don't create profile here - let the auth listener detect no profile and show onboarding
       // The user will go through onboarding flow where they can set their display name
       // The auth state listener will automatically show onboarding if no profile exists
@@ -2454,15 +2488,32 @@ export default function RingsidePickemFinal() {
   };
 
   const handleEmailSignIn = async () => {
+    // Rate limiting check
+    if (!authRateLimiter.isAllowed('email-signin')) {
+      const waitTime = Math.ceil(authRateLimiter.getTimeUntilNext('email-signin') / 1000);
+      setLoginError(`Too many login attempts. Please wait ${waitTime} seconds.`);
+      return;
+    }
+    
+    // Input validation
     if (!email.trim() || !password.trim()) {
       setLoginError('Please enter email and password');
       return;
     }
+    
+    // Validate email format
+    if (!isValidEmail(email)) {
+      setLoginError('Please enter a valid email address');
+      return;
+    }
+    
+    // Sanitize email
+    const sanitizedEmail = sanitizeString(email.trim().toLowerCase());
 
     setIsLoggingIn(true);
     setLoginError(null);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      await signInWithEmailAndPassword(auth, sanitizedEmail, password);
       // User profile will be loaded by the auth state listener
     } catch (error) {
       console.error("Sign in error:", error);
@@ -2659,10 +2710,20 @@ export default function RingsidePickemFinal() {
     if (!tempName.trim() || isSubmitting) return;
     if (!user) return;
     
+    // Validate display name
+    const nameValidation = validateDisplayName(tempName);
+    if (!nameValidation.isValid) {
+      setLoginError(nameValidation.errors[0]);
+      return;
+    }
+    
+    // Sanitize display name
+    const sanitizedName = sanitizeString(tempName.trim());
+    
     setIsSubmitting(true);
 
     const localProfile = {
-      displayName: tempName,
+      displayName: sanitizedName,
       subscriptions: tempSubs || [], // Safe default
       totalPoints: 0,
       predictionsCorrect: 0,
@@ -3086,316 +3147,49 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
   // --- VIEW: LOGIN ---
   if (viewState === 'login') {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col p-6 animate-fadeIn relative overflow-hidden">
-         <div className="absolute top-0 left-0 w-full h-2/3 bg-gradient-to-b from-red-900/20 to-slate-950 z-0"></div>
-         <div className="relative z-10 flex flex-col h-full max-w-md mx-auto w-full">
-            <div className="flex-1 flex flex-col items-center justify-center text-center space-y-6 mb-8">
-                <div className="w-24 h-24 bg-red-600 rounded-3xl flex items-center justify-center shadow-2xl shadow-red-900/50 mb-4 transform -rotate-3">
-                   <Trophy className="text-white w-12 h-12" />
-                </div>
-                <div>
-                   <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase mb-2">RINGSIDE <span className="text-red-600">PICK'EM</span></h1>
-                   <p className="text-slate-400 max-w-xs mx-auto text-sm leading-relaxed">Predict winners. Climb ranks. Become a legend.</p>
-                </div>
-            </div>
-            
-            {/* Auth Mode Tabs */}
-            <div className="flex gap-2 mb-6 bg-slate-900/50 p-1 rounded-xl border border-slate-800">
-              <button
-                onClick={() => { setAuthMode('guest'); setLoginError(null); }}
-                className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold transition-all ${
-                  authMode === 'guest' 
-                    ? 'bg-red-600 text-white' 
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Guest
-              </button>
-              <button
-                onClick={() => { setAuthMode('signin'); setLoginError(null); }}
-                className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold transition-all ${
-                  authMode === 'signin' 
-                    ? 'bg-red-600 text-white' 
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Sign In
-              </button>
-              <button
-                onClick={() => { setAuthMode('signup'); setLoginError(null); }}
-                className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold transition-all ${
-                  authMode === 'signup' 
-                    ? 'bg-red-600 text-white' 
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Sign Up
-              </button>
-            </div>
-
-            <div className="space-y-4 mb-8">
-               {loginError && (
-                 <div className={`p-3 rounded-lg text-xs text-center border ${
-                   loginError.includes('sent') || loginError.includes('Check')
-                     ? 'bg-green-900/30 text-green-400 border-green-900/50'
-                     : 'bg-red-900/30 text-red-400 border-red-900/50'
-                 }`}>
-                   {loginError}
-                 </div>
-               )}
-
-               {/* Guest Login */}
-               {authMode === 'guest' && (
-                 <>
-                   <button 
-                     onClick={handleGuestLogin}
-                     disabled={isLoggingIn}
-                     className="w-full bg-white hover:bg-slate-200 text-slate-900 py-4 rounded-xl font-bold flex items-center justify-center gap-3 transition-transform active:scale-95 shadow-xl disabled:opacity-50"
-                   >
-                      {isLoggingIn ? <Loader2 className="animate-spin" /> : <Shield size={20} />}
-                      {isLoggingIn ? "Connecting..." : "Continue as Guest"}
-                   </button>
-                   
-                   <div className="flex items-center gap-3 my-4">
-                     <div className="flex-1 h-px bg-slate-800"></div>
-                     <span className="text-xs text-slate-500 uppercase font-bold">Or</span>
-                     <div className="flex-1 h-px bg-slate-800"></div>
-                   </div>
-                   
-                   <button
-                     onClick={handleGoogleSignIn}
-                     disabled={isLoggingIn}
-                     className="w-full bg-white hover:bg-slate-100 text-slate-900 py-4 rounded-xl font-bold flex items-center justify-center gap-3 transition-all disabled:opacity-50 border border-slate-300"
-                   >
-                     {isLoggingIn ? (
-                       <Loader2 className="animate-spin" />
-                     ) : (
-                       <>
-                         <svg className="w-5 h-5" viewBox="0 0 24 24">
-                           <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                           <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                           <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                           <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                         </svg>
-                         Continue with Google
-                       </>
-                     )}
-                   </button>
-                 </>
-               )}
-
-               {/* Sign In Form */}
-               {authMode === 'signin' && (
-                 <div className="space-y-4">
-                   <div>
-                     <input
-                       type="email"
-                       placeholder="Email"
-                       value={email}
-                       onChange={(e) => setEmail(e.target.value)}
-                       className="w-full bg-slate-900/50 border border-slate-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
-                       disabled={isLoggingIn}
-                     />
-                   </div>
-                   <div>
-                     <input
-                       type="password"
-                       placeholder="Password"
-                       value={password}
-                       onChange={(e) => setPassword(e.target.value)}
-                       onKeyPress={(e) => e.key === 'Enter' && handleEmailSignIn()}
-                       className="w-full bg-slate-900/50 border border-slate-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
-                       disabled={isLoggingIn}
-                     />
-                   </div>
-                   <button
-                     onClick={handleEmailSignIn}
-                     disabled={isLoggingIn}
-                     className="w-full bg-red-600 hover:bg-red-700 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-3 transition-all disabled:opacity-50"
-                   >
-                     {isLoggingIn ? <Loader2 className="animate-spin" /> : 'Sign In'}
-                   </button>
-                   <button
-                     onClick={handlePasswordReset}
-                     className="w-full text-slate-400 hover:text-white text-sm font-medium"
-                   >
-                     Forgot password?
-                   </button>
-                   
-                   <div className="flex items-center gap-3 my-4">
-                     <div className="flex-1 h-px bg-slate-800"></div>
-                     <span className="text-xs text-slate-500 uppercase font-bold">Or</span>
-                     <div className="flex-1 h-px bg-slate-800"></div>
-                   </div>
-                   
-                   <button
-                     onClick={handleGoogleSignIn}
-                     disabled={isLoggingIn}
-                     className="w-full bg-white hover:bg-slate-100 text-slate-900 py-4 rounded-xl font-bold flex items-center justify-center gap-3 transition-all disabled:opacity-50 border border-slate-300"
-                   >
-                     {isLoggingIn ? (
-                       <Loader2 className="animate-spin" />
-                     ) : (
-                       <>
-                         <svg className="w-5 h-5" viewBox="0 0 24 24">
-                           <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                           <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                           <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                           <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                         </svg>
-                         Sign in with Google
-                       </>
-                     )}
-                   </button>
-                 </div>
-               )}
-
-               {/* Sign Up Form */}
-               {authMode === 'signup' && (
-                 <div className="space-y-4">
-                   <div>
-                     <input
-                       type="text"
-                       placeholder="Display Name"
-                       value={displayName}
-                       onChange={(e) => setDisplayName(e.target.value)}
-                       className="w-full bg-slate-900/50 border border-slate-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
-                       disabled={isLoggingIn}
-                     />
-                   </div>
-                   <div>
-                     <input
-                       type="email"
-                       placeholder="Email"
-                       value={email}
-                       onChange={(e) => setEmail(e.target.value)}
-                       className="w-full bg-slate-900/50 border border-slate-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
-                       disabled={isLoggingIn}
-                     />
-                   </div>
-                   <div>
-                     <input
-                       type="password"
-                       placeholder="Password (min. 6 characters)"
-                       value={password}
-                       onChange={(e) => setPassword(e.target.value)}
-                       className="w-full bg-slate-900/50 border border-slate-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
-                       disabled={isLoggingIn}
-                     />
-                   </div>
-                   <div>
-                     <input
-                       type="password"
-                       placeholder="Confirm Password"
-                       value={confirmPassword}
-                       onChange={(e) => setConfirmPassword(e.target.value)}
-                       onKeyPress={(e) => e.key === 'Enter' && handleEmailSignUp()}
-                       className="w-full bg-slate-900/50 border border-slate-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
-                       disabled={isLoggingIn}
-                     />
-                   </div>
-                   <button
-                     onClick={handleEmailSignUp}
-                     disabled={isLoggingIn}
-                     className="w-full bg-red-600 hover:bg-red-700 text-white py-4 rounded-xl font-bold flex items-center justify-center gap-3 transition-all disabled:opacity-50"
-                   >
-                     {isLoggingIn ? <Loader2 className="animate-spin" /> : 'Create Account'}
-                   </button>
-                   
-                   <div className="flex items-center gap-3 my-4">
-                     <div className="flex-1 h-px bg-slate-800"></div>
-                     <span className="text-xs text-slate-500 uppercase font-bold">Or</span>
-                     <div className="flex-1 h-px bg-slate-800"></div>
-                   </div>
-                   
-                   <button
-                     onClick={handleGoogleSignIn}
-                     disabled={isLoggingIn}
-                     className="w-full bg-white hover:bg-slate-100 text-slate-900 py-4 rounded-xl font-bold flex items-center justify-center gap-3 transition-all disabled:opacity-50 border border-slate-300"
-                   >
-                     {isLoggingIn ? (
-                       <Loader2 className="animate-spin" />
-                     ) : (
-                       <>
-                         <svg className="w-5 h-5" viewBox="0 0 24 24">
-                           <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                           <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                           <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                           <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                         </svg>
-                         Sign up with Google
-                       </>
-                     )}
-                   </button>
-                 </div>
-               )}
-            </div>
-         </div>
-      </div>
+      <Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center"><Activity className="animate-spin text-red-600" /></div>}>
+        <LoginView
+          authMode={authMode}
+          setAuthMode={setAuthMode}
+          email={email}
+          setEmail={setEmail}
+          password={password}
+          setPassword={setPassword}
+          confirmPassword={confirmPassword}
+          setConfirmPassword={setConfirmPassword}
+          displayName={displayName}
+          setDisplayName={setDisplayName}
+          loginError={loginError}
+          setLoginError={setLoginError}
+          isLoggingIn={isLoggingIn}
+          handleGuestLogin={handleGuestLogin}
+          handleGoogleSignIn={handleGoogleSignIn}
+          handleEmailSignIn={handleEmailSignIn}
+          handleEmailSignUp={handleEmailSignUp}
+          handlePasswordReset={handlePasswordReset}
+        />
+      </Suspense>
     );
   }
 
   // --- VIEW: ONBOARDING ---
   if (viewState === 'onboarding') {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col p-6 animate-fadeIn">
-         {onboardingPage === 1 && (
-            <div className="flex-1 flex flex-col justify-center max-w-sm mx-auto w-full animate-fadeIn">
-               <h1 className="text-2xl font-black text-white italic uppercase mb-2">Who are you?</h1>
-               <p className="text-slate-400 mb-6 text-sm">Choose a display name for the leaderboards.</p>
-               <input 
-                  type="text" 
-                  autoFocus
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-white font-bold mb-4 focus:border-red-600 outline-none"
-                  placeholder="Manager Name"
-                  value={tempName}
-                  onChange={(e) => setTempName(e.target.value)}
-               />
-               <button 
-                 onClick={() => tempName.trim() && setOnboardingPage(2)}
-                 disabled={!tempName.trim()}
-                 className={`w-full py-4 rounded-xl font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all ${tempName.trim() ? 'bg-red-600 text-white shadow-lg' : 'bg-slate-800 text-slate-500'}`}
-               >
-                 Next Step <ArrowRight size={18} />
-               </button>
-            </div>
-         )}
-
-         {onboardingPage === 2 && (
-            <div className="flex-1 flex flex-col max-w-md mx-auto w-full h-full animate-fadeIn">
-               <div className="mb-6">
-                 <button onClick={() => setOnboardingPage(1)} className="text-slate-500 hover:text-white text-xs font-bold uppercase mb-4">← Back</button>
-                 <h1 className="text-2xl font-black text-white italic uppercase mb-2">Your Territory</h1>
-                 <p className="text-slate-400 text-sm">Select promotions to follow.</p>
-                 {loginError && (
-                   <div className="mt-4 bg-red-900/30 text-red-400 p-3 rounded-lg text-xs border border-red-900/50">
-                     {loginError}
-                   </div>
-                 )}
-               </div>
-               <div className="flex-1 overflow-y-auto space-y-3 mb-6 pr-2 scrollbar-hide">
-                  {PROMOTIONS.map(p => {
-                     const isSelected = tempSubs.includes(p.id);
-                     return (
-                       <div key={p.id} onClick={() => handleOnboardingToggle(p.id)} className={`flex items-center gap-4 p-3 rounded-xl border cursor-pointer transition-all ${isSelected ? 'bg-slate-900 border-red-500/50 ring-1 ring-red-500/20' : 'bg-slate-900/50 border-slate-800 opacity-60'}`}>
-                          <div className={`w-10 h-10 p-1 rounded-lg border bg-slate-800 ${p.border}`}><BrandLogo id={p.id} /></div>
-                          <span className="flex-1 font-bold text-white">{p.name}</span>
-                          <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${isSelected ? 'bg-red-600 border-red-600 text-white' : 'border-slate-600'}`}>{isSelected && <CheckCircle size={12} />}</div>
-                       </div>
-                     );
-                  })}
-               </div>
-               <button 
-                 onClick={completeOnboarding} 
-                 disabled={tempSubs.length === 0 || isSubmitting}
-                 className={`w-full py-4 rounded-xl font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all ${tempSubs.length > 0 ? 'bg-white text-black hover:bg-slate-200 shadow-xl' : 'bg-slate-800 text-slate-500'}`}
-               >
-                 {isSubmitting ? <Loader2 className="animate-spin" /> : <Sparkles size={18} className="text-red-600" />}
-                 {isSubmitting ? "Starting..." : "Start Career"}
-               </button>
-            </div>
-         )}
-      </div>
+      <Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center"><Activity className="animate-spin text-red-600" /></div>}>
+        <OnboardingFlow
+          onboardingPage={onboardingPage}
+          setOnboardingPage={setOnboardingPage}
+          tempName={tempName}
+          setTempName={setTempName}
+          tempSubs={tempSubs}
+          handleOnboardingToggle={handleOnboardingToggle}
+          completeOnboarding={completeOnboarding}
+          isSubmitting={isSubmitting}
+          loginError={loginError}
+          PROMOTIONS={PROMOTIONS}
+          BrandLogo={BrandLogo}
+        />
+      </Suspense>
     );
   }
 
@@ -3504,45 +3298,14 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
         )}
 
         {activeTab === 'leaderboard' && (
-          <div className="space-y-6 animate-fadeIn">
-            <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl text-center">
-               <Trophy className="mx-auto text-yellow-500 mb-2 w-8 h-8 drop-shadow-lg" />
-               <h2 className="text-2xl font-black text-white mb-4">Rankings</h2>
-               <div className="flex p-1 bg-slate-950 rounded-lg border border-slate-800">
-                  {['global', 'country', 'region', 'friends'].map(scope => (
-                    <button key={scope} onClick={() => setLeaderboardScope(scope)} className={`flex-1 py-1.5 rounded-md text-[10px] font-bold uppercase transition-all ${leaderboardScope === scope ? 'bg-slate-800 text-white shadow' : 'text-slate-500'}`}>{scope}</button>
-                  ))}
-               </div>
-            </div>
-            <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
-               <div className="p-3 bg-slate-950 border-b border-slate-800 flex justify-between text-[10px] font-bold uppercase text-slate-500 tracking-wider"><span>Manager</span><span>Score</span></div>
-               <div className="divide-y divide-slate-800">
-                  {filteredLeaderboard.map((player, idx) => {
-                    const isMe = player.id === userId;
-                    return (
-                      <div key={player.id} className={`p-4 flex items-center justify-between transition-colors ${isMe ? 'bg-red-900/10' : 'hover:bg-slate-800/50'}`}>
-                         <div className="flex items-center gap-4">
-                            <div className={`font-black font-mono text-sm w-8 text-center ${idx === 0 ? 'text-yellow-400 text-lg' : idx === 1 ? 'text-slate-300' : idx === 2 ? 'text-orange-400' : 'text-slate-600'}`}>{idx + 1}</div>
-                            <div className="flex flex-col">
-                               <div className="flex items-center gap-2"><span className={`font-bold text-sm ${isMe ? 'text-red-500' : 'text-white'}`}>{player.displayName}</span>{isMe && <span className="text-[8px] font-bold bg-slate-800 px-1.5 py-0.5 rounded text-slate-400">YOU</span>}</div>
-                               <div className="flex items-center gap-2 text-[10px] text-slate-500 font-medium">{leaderboardScope !== 'global' && <span className="flex items-center gap-1"><Flag size={8} /> {player.country || 'USA'}</span>}<span>{player.predictionsCorrect} Wins</span></div>
-                            </div>
-                         </div>
-                         <div className="font-mono font-black text-white">{player.totalPoints}</div>
-                      </div>
-                    );
-                  })}
-               </div>
-            </div>
-            
-            {leaderboardScope === 'friends' && (
-               <div className="text-center">
-                  <button className="text-xs font-bold text-slate-500 hover:text-white flex items-center justify-center gap-2 mx-auto">
-                     <UserPlus size={14} /> Invite Friends
-                  </button>
-               </div>
-            )}
-          </div>
+          <Suspense fallback={<LoadingSpinner className="p-8" />}>
+            <LeaderboardView
+              leaderboardScope={leaderboardScope}
+              setLeaderboardScope={setLeaderboardScope}
+              filteredLeaderboard={filteredLeaderboard}
+              userId={userId}
+            />
+          </Suspense>
         )}
 
         {activeTab === 'event' && selectedEvent && selectedEvent.id && (
@@ -4117,146 +3880,31 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
         )}
 
         {activeTab === 'settings' && (
-           <div className="space-y-6 animate-fadeIn pb-24">
-              <h2 className="text-2xl font-black text-white">Settings</h2>
-              
-              {/* Account Info */}
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                 <h3 className="text-sm font-bold text-slate-400 uppercase mb-4">Account</h3>
-                 <div className="space-y-4">
-                   <div className="flex items-center justify-between">
-                     <div>
-                       <div className="font-bold text-white">{userProfile?.displayName || user?.displayName || 'Guest User'}</div>
-                       <div className="text-xs text-slate-500">
-                         {user?.email || 'Anonymous account'}
-                       </div>
-                       <div className="text-xs text-slate-600">ID: {user?.uid?.substring(0,8)}...</div>
-                     </div>
-                     <button onClick={handleLogout} className="bg-red-900/20 hover:bg-red-900/40 text-red-400 px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-colors">
-                       <LogOut size={14} /> Sign Out
-                     </button>
-                   </div>
-                   
-                   {accountError && (
-                     <div className="bg-red-900/30 text-red-400 p-3 rounded-lg text-xs border border-red-900/50">
-                       {accountError}
-                     </div>
-                   )}
-                   
-                   {accountSuccess && (
-                     <div className="bg-green-900/30 text-green-400 p-3 rounded-lg text-xs border border-green-900/50">
-                       {accountSuccess}
-                     </div>
-                   )}
-                 </div>
-              </div>
-
-              {/* Update Display Name */}
-              {user && !user.isAnonymous && (
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                  <h3 className="text-sm font-bold text-slate-400 uppercase mb-4">Display Name</h3>
-                  <div className="space-y-3">
-                    <input
-                      type="text"
-                      placeholder="Display Name"
-                      value={displayName || userProfile?.displayName || user?.displayName || ''}
-                      onChange={(e) => setDisplayName(e.target.value)}
-                      className="w-full bg-slate-950/50 border border-slate-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
-                    />
-                    <button
-                      onClick={handleUpdateDisplayName}
-                      className="w-full bg-slate-800 hover:bg-slate-700 text-white py-2 rounded-lg text-sm font-bold transition-colors"
-                    >
-                      Update Display Name
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Change Email */}
-              {user && !user.isAnonymous && (
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                  <h3 className="text-sm font-bold text-slate-400 uppercase mb-4">Change Email</h3>
-                  <div className="space-y-3">
-                    <div className="text-xs text-slate-500 mb-2">Current: {user.email}</div>
-                    <input
-                      type="email"
-                      placeholder="New Email"
-                      value={newEmail}
-                      onChange={(e) => setNewEmail(e.target.value)}
-                      className="w-full bg-slate-950/50 border border-slate-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
-                    />
-                    <button
-                      onClick={handleChangeEmail}
-                      className="w-full bg-slate-800 hover:bg-slate-700 text-white py-2 rounded-lg text-sm font-bold transition-colors"
-                    >
-                      Update Email
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Change Password */}
-              {user && !user.isAnonymous && (
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                  <h3 className="text-sm font-bold text-slate-400 uppercase mb-4">Change Password</h3>
-                  <div className="space-y-3">
-                    <input
-                      type="password"
-                      placeholder="New Password"
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      className="w-full bg-slate-950/50 border border-slate-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
-                    />
-                    <input
-                      type="password"
-                      placeholder="Confirm New Password"
-                      value={confirmNewPassword}
-                      onChange={(e) => setConfirmNewPassword(e.target.value)}
-                      onKeyPress={(e) => e.key === 'Enter' && handleChangePassword()}
-                      className="w-full bg-slate-950/50 border border-slate-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent"
-                    />
-                    <button
-                      onClick={handleChangePassword}
-                      className="w-full bg-slate-800 hover:bg-slate-700 text-white py-2 rounded-lg text-sm font-bold transition-colors"
-                    >
-                      Update Password
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Guest Account Upgrade Notice */}
-              {user && user.isAnonymous && (
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                  <h3 className="text-sm font-bold text-slate-400 uppercase mb-2">Upgrade to Account</h3>
-                  <p className="text-xs text-slate-500 mb-3">
-                    Create an account to save your predictions and settings permanently.
-                  </p>
-                  <button
-                    onClick={() => {
-                      handleLogout();
-                      setViewState('login');
-                      setAuthMode('signup');
-                    }}
-                    className="w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg text-sm font-bold transition-colors"
-                  >
-                    Create Account
-                  </button>
-                </div>
-              )}
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                 <h3 className="text-sm font-bold text-slate-400 uppercase mb-4">Promotions</h3>
-                 <div className="space-y-3">
-                    {PROMOTIONS.map(p => (
-                       <div key={p.id} className="flex items-center justify-between p-2 rounded-lg bg-slate-950/50 border border-slate-800/50">
-                          <div className="flex items-center gap-3"><div className="w-10 h-10 p-1 bg-slate-900 rounded border border-slate-800"><BrandLogo id={p.id} /></div><span className="font-bold">{p.name}</span></div>
-                          <Toggle enabled={(userProfile?.subscriptions||[]).includes(p.id)} onClick={() => handleToggleSub(p.id)} />
-                       </div>
-                    ))}
-                 </div>
-              </div>
-           </div>
+          <Suspense fallback={<LoadingSpinner className="p-8" />}>
+            <SettingsPanel
+              user={user}
+              userProfile={userProfile}
+              displayName={displayName}
+              setDisplayName={setDisplayName}
+              newEmail={newEmail}
+              setNewEmail={setNewEmail}
+              newPassword={newPassword}
+              setNewPassword={setNewPassword}
+              confirmNewPassword={confirmNewPassword}
+              setConfirmNewPassword={setConfirmNewPassword}
+              accountError={accountError}
+              accountSuccess={accountSuccess}
+              handleLogout={handleLogout}
+              handleUpdateDisplayName={handleUpdateDisplayName}
+              handleChangeEmail={handleChangeEmail}
+              handleChangePassword={handleChangePassword}
+              handleToggleSub={handleToggleSub}
+              setViewState={setViewState}
+              setAuthMode={setAuthMode}
+              PROMOTIONS={PROMOTIONS}
+              BrandLogo={BrandLogo}
+            />
+          </Suspense>
         )}
       </div>
 
