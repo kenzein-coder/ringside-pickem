@@ -1976,6 +1976,7 @@ export default function RingsidePickemFinal() {
   const [selectedMethod, setSelectedMethod] = useState({}); // { eventId-matchId: 'pinfall' }
   const [predictionsUserId, setPredictionsUserId] = useState(null); // Track which user's predictions we're showing
   const [eventTypeFilter, setEventTypeFilter] = useState('ppv'); // 'ppv', 'weekly', or 'past'
+  const [hideEmptyEvents, setHideEmptyEvents] = useState(false); // Hide events with no match cards
   const [customInputText, setCustomInputText] = useState({}); // Track custom input text for rumble matches: { matchId: string }
   
   // Use ref to track current user ID - this won't cause re-renders and is always current
@@ -3100,14 +3101,26 @@ export default function RingsidePickemFinal() {
       const isPast = eventDate < today;
       const isRecentPast = eventDate >= twoWeeksAgo && eventDate < today;
       
+      // Check event type filter
+      let passesTypeFilter = false;
       if (eventTypeFilter === 'past') {
-        return isPast && !isWeekly; // Past PPVs only
+        passesTypeFilter = isPast && !isWeekly; // Past PPVs only
       } else if (eventTypeFilter === 'weekly') {
         // Show upcoming weekly shows OR recent past weekly shows (last 2 weeks)
-        return (!isPast && isWeekly) || (isRecentPast && isWeekly);
+        passesTypeFilter = (!isPast && isWeekly) || (isRecentPast && isWeekly);
       } else {
-        return !isPast && !isWeekly; // Upcoming PPVs (default)
+        passesTypeFilter = !isPast && !isWeekly; // Upcoming PPVs (default)
       }
+      
+      if (!passesTypeFilter) return false;
+      
+      // Optionally filter out events with no matches
+      if (hideEmptyEvents) {
+        const hasMatches = ev.matches && Array.isArray(ev.matches) && ev.matches.length > 0;
+        return hasMatches;
+      }
+      
+      return true;
     });
     
     // Sort by date
@@ -3118,7 +3131,7 @@ export default function RingsidePickemFinal() {
       const dateB = parseDate(b.date);
       return eventTypeFilter === 'past' ? dateB - dateA : dateA - dateB;
     });
-  }, [userProfile, scrapedEvents, eventTypeFilter]);
+  }, [userProfile, scrapedEvents, eventTypeFilter, hideEmptyEvents]);
 
   // --- VIEW: FIREBASE ERROR ---
   if (firebaseError) {
@@ -3232,7 +3245,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
               </div>
             </div>
             {/* Event Type Toggle */}
-            <div className="flex items-center justify-between">
+            <div className="space-y-3">
               <div className="flex p-1 bg-slate-900 rounded-xl border border-slate-800">
                 <button 
                   onClick={() => setEventTypeFilter('ppv')}
@@ -3268,6 +3281,19 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                   Past
                 </button>
               </div>
+              {/* Hide Empty Events Toggle */}
+              <button
+                onClick={() => setHideEmptyEvents(!hideEmptyEvents)}
+                className="w-full flex items-center justify-between px-4 py-2 bg-slate-900 rounded-lg border border-slate-800 text-xs font-bold hover:bg-slate-800 transition-all"
+              >
+                <span className="flex items-center gap-2 text-slate-400">
+                  <Filter size={14} />
+                  Hide events without match cards
+                </span>
+                <div className={`w-10 h-5 rounded-full transition-all ${hideEmptyEvents ? 'bg-red-600' : 'bg-slate-700'}`}>
+                  <div className={`w-4 h-4 bg-white rounded-full transition-all mt-0.5 ${hideEmptyEvents ? 'ml-5' : 'ml-0.5'}`}></div>
+                </div>
+              </button>
             </div>
             {myEvents.length === 0 ? (
                <div className="text-center py-12 bg-slate-900/50 rounded-xl border border-dashed border-slate-800"><Filter className="w-12 h-12 text-slate-700 mx-auto mb-3" /><p className="text-slate-500 text-sm mb-4">Feed empty.</p><button onClick={() => setActiveTab('settings')} className="bg-slate-800 text-white px-4 py-2 rounded-full text-xs font-bold">Add Promotions</button></div>
@@ -3278,6 +3304,8 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                 const hasEventResults = eventResults[event.id];
                 const hasMatchWinners = event.matches?.some(m => m.winner);
                 const isGraded = hasEventResults || hasMatchWinners;
+                // Check if event has matches
+                const hasMatches = event.matches && Array.isArray(event.matches) && event.matches.length > 0;
                 return (
                   <div key={event.id} onClick={(e) => { 
                     e.stopPropagation();
@@ -3288,9 +3316,10 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                     <div className="absolute inset-0 p-5 flex flex-col justify-end">
                       <div className="flex justify-between items-end">
                         <div className="flex-1">
-                          <div className="mb-3 flex items-center gap-2">
+                          <div className="mb-3 flex items-center gap-2 flex-wrap">
                              <div className="w-10 h-10 p-1 bg-slate-950/80 rounded-lg backdrop-blur-sm border border-slate-800"><BrandLogo id={promo.id} /></div>
                              {isGraded && <div className="bg-green-500/20 text-green-400 px-2 py-1 rounded text-[10px] font-black uppercase flex items-center gap-1"><CheckCircle size={10} /> Complete</div>}
+                             {!hasMatches && !isGraded && <div className="bg-yellow-500/20 text-yellow-400 px-2 py-1 rounded text-[10px] font-black uppercase flex items-center gap-1"><Clock size={10} /> Coming Soon</div>}
                           </div>
                           <h4 className="font-black text-2xl text-white leading-none mb-1 italic uppercase shadow-black drop-shadow-md">{event.name}</h4>
                           <div className="flex items-center gap-2 text-xs text-slate-300 font-medium"><span className="flex items-center gap-1"><Calendar size={10} /> {event.date}</span>{event.venue && event.venue !== 'TBD' && <><span className="w-1 h-1 rounded-full bg-slate-500"></span><span className="flex items-center gap-1"><MapPin size={10} /> {event.venue}</span></>}{(!event.venue || event.venue === 'TBD') && <><span className="w-1 h-1 rounded-full bg-slate-500"></span><span className="flex items-center gap-1 text-slate-500"><MapPin size={10} /> TBA</span></>}</div>
