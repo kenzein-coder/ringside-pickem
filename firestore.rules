@@ -2,14 +2,41 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // USER DATA - Users can only access their own
+    // Helper function to check if user is admin
+    // Check from public user profiles to avoid circular dependency
+    function isAdmin(appId) {
+      return request.auth != null && 
+             get(/databases/$(database)/documents/artifacts/$(appId)/public/data/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+    
+    // ROOT USERS COLLECTION - For admin panel
+    // Simplified: allow authenticated users to read, but write only their own
+    match /users/{userId} {
+      allow read: if request.auth != null; // Any authenticated user can read
+      allow write: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null; // Allow creating new users
+      allow delete: if request.auth != null; // Allow deleting users (for admin panel)
+    }
+    
+    // USER DATA - Publicly readable, users can write their own
     match /artifacts/{appId}/public/data/users/{userId} {
       allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null; // Allow creating user profiles
+      allow update: if request.auth != null && (request.auth.uid == userId || isAdmin(appId)); // Admins can update any user
+      allow delete: if request.auth != null; // Allow deleting user profiles (for admin panel)
+    }
+    
+    // PREDICTIONS - Users own, Admins can read all for analytics
+    match /artifacts/{appId}/public/predictions/{userId} {
+      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin(appId));
       allow write: if request.auth != null && request.auth.uid == userId;
     }
     
     match /artifacts/{appId}/users/{userId}/predictions/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin(appId));
+      allow write: if request.auth != null && request.auth.uid == userId;
+      allow delete: if request.auth != null; // Allow deleting predictions (for admin panel)
     }
     
     match /artifacts/{appId}/users/{userId}/lockedEvents/{document=**} {
@@ -17,6 +44,7 @@ service cloud.firestore {
     }
     
     // PUBLIC DATA - READ ONLY (write via server-side scripts only)
+    // EXCEPT: Admins can write to events for admin panel
     match /artifacts/{appId}/public/data/promotions/{promoId} {
       allow read: if true;
       allow write: if false;
@@ -24,7 +52,8 @@ service cloud.firestore {
     
     match /artifacts/{appId}/public/data/events/{eventId} {
       allow read: if true;
-      allow write: if false;
+      allow write: if isAdmin(appId); // Admins can create/edit/delete events
+      allow delete: if isAdmin(appId); // Admins can delete events
     }
     
     match /artifacts/{appId}/public/data/images/{document=**} {

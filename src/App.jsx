@@ -32,6 +32,7 @@ import {
   query, 
   orderBy, 
   updateDoc,
+  deleteDoc,
   serverTimestamp,
   increment,
   limit,
@@ -68,7 +69,16 @@ import {
   Shield,
   Loader2,
   Tv,
-  Clock
+  Clock,
+  Edit,
+  Trash2,
+  Save,
+  X as XIcon,
+  XCircle,
+  PlusCircle,
+  Upload,
+  FileText,
+  Search
 } from 'lucide-react';
 import { validateDisplayName, isValidEmail, validatePassword, sanitizeString } from './utils/inputValidation.js';
 import { authRateLimiter, predictionRateLimiter } from './utils/rateLimiter.js';
@@ -336,132 +346,8 @@ const PROMOTION_LOGOS = {
   'Major League Wrestling': 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9a/Major_League_Wrestling_logo.svg/200px-Major_League_Wrestling_logo.svg.png',
 };
 
-// Helper function to download an image and upload to Firebase Storage
-const downloadAndUploadImage = async (imageUrl, type, identifier) => {
-  if (!storage || !imageUrl) return null;
-  
-  try {
-    // Create a safe filename from the identifier
-    const safeName = identifier.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
-    const fileExtension = imageUrl.split('.').pop().split('?')[0] || 'jpg';
-    const storagePath = `images/${type}/${safeName}.${fileExtension}`;
-    const storageRef = ref(storage, storagePath);
-    
-    // Check if image already exists in Storage
-    try {
-      const existingUrl = await getDownloadURL(storageRef);
-      if (existingUrl) {
-        // Save the Storage URL to Firestore
-        await saveImageToFirestore(type, identifier, existingUrl);
-        return existingUrl;
-      }
-    } catch (e) {
-      // Image doesn't exist, continue to download and upload
-    }
-    
-    // Download the image
-    const response = await fetch(imageUrl, {
-      mode: 'cors',
-      referrerPolicy: 'no-referrer'
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Failed to download image: ${response.status}`);
-    }
-    
-    const blob = await response.blob();
-    
-    // Upload to Firebase Storage
-    const metadata = {
-      contentType: blob.type || `image/${fileExtension}`,
-      customMetadata: {
-        originalUrl: imageUrl,
-        uploadedAt: new Date().toISOString()
-      }
-    };
-    
-    await uploadBytes(storageRef, blob, metadata);
-    
-    // Get the download URL
-    const downloadURL = await getDownloadURL(storageRef);
-    
-    // Save the Storage URL to Firestore
-    await saveImageToFirestore(type, identifier, downloadURL);
-    
-    return downloadURL;
-  } catch (error) {
-    console.log(`Failed to download and upload image for ${identifier}:`, error);
-    return null;
-  }
-};
-
-// Helper function to get image from Firebase Storage
-const getImageFromStorage = async (type, identifier) => {
-  if (!storage) return null;
-  
-  try {
-    const safeName = identifier.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
-    // Try common extensions
-    const extensions = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
-    
-    for (const ext of extensions) {
-      try {
-        const storagePath = `images/${type}/${safeName}.${ext}`;
-        const storageRef = ref(storage, storagePath);
-        const downloadURL = await getDownloadURL(storageRef);
-        return downloadURL;
-      } catch (e) {
-        // Check if it's a CORS error - if so, return null immediately to avoid blocking
-        if (e.message?.includes('CORS') || e.code === 'storage/unauthorized') {
-          return null;
-        }
-        // Try next extension
-        continue;
-      }
-    }
-    
-    // If no extension worked, try without extension (in case it was stored differently)
-    try {
-      const storagePath = `images/${type}/${safeName}`;
-      const storageRef = ref(storage, storagePath);
-      const downloadURL = await getDownloadURL(storageRef);
-      return downloadURL;
-    } catch (e) {
-      // Check if it's a CORS error
-      if (e.message?.includes('CORS') || e.code === 'storage/unauthorized') {
-        return null;
-      }
-      // Image doesn't exist in Storage
-      return null;
-    }
-  } catch (error) {
-    // Check if it's a CORS error
-    if (error.message?.includes('CORS') || error.code === 'storage/unauthorized') {
-      return null;
-    }
-    // Image doesn't exist in Storage or other error
-    return null;
-  }
-};
-
-// Helper function to save image URL to Firestore
-const saveImageToFirestore = async (type, identifier, imageUrl) => {
-  if (!db || !appId) return;
-  
-  try {
-    const imageDoc = doc(db, 'artifacts', appId, 'public', 'data', 'images', type);
-    const currentData = await getDoc(imageDoc);
-    const existingImages = currentData.exists() ? currentData.data() : {};
-    
-    await setDoc(imageDoc, {
-      ...existingImages,
-      [identifier]: imageUrl,
-      updatedAt: serverTimestamp()
-    }, { merge: true });
-  } catch (error) {
-    console.log(`Failed to save image to Firestore:`, error);
-  }
-};
+// NOTE: All image uploads are now handled server-side by the scraper
+// Client-side upload logic has been removed due to Firebase Storage security rules
 
 // Helper function to get image URL from Firestore
 const getImageFromFirestore = async (type, identifier) => {
@@ -995,12 +881,27 @@ const searchEventPoster = async (eventId, eventName) => {
   return null;
 };
 
-// Known event posters from reliable sources (Wikipedia Commons, etc.)
-// These are verified working URLs that can be used as fallbacks
+// Known event posters from reliable sources
+// These are curated, verified working URLs
+// To add more: Use Admin Panel → Edit Event → Add Poster URL
 const KNOWN_EVENT_POSTERS = {
-  // Add known event posters here as they're found
-  // Format: 'event-id': 'image-url'
-  // Example: 'wwe-wrestlemania-40': 'https://upload.wikimedia.org/...'
+  // WWE 2026
+  'wwe-royal-rumble-2026': 'https://upload.wikimedia.org/wikipedia/en/thumb/f/f5/Royal_Rumble_%282024%29.jpg/220px-Royal_Rumble_%282024%29.jpg',
+  'wwe-elimination-chamber-2026': 'https://upload.wikimedia.org/wikipedia/en/thumb/9/92/Elimination_Chamber_2024.jpg/220px-Elimination_Chamber_2024.jpg',
+  
+  // WWE 2025
+  'wwe-survivor-series-2025': 'https://upload.wikimedia.org/wikipedia/en/thumb/5/58/Survivor_Series_WarGames_2023_poster.jpg/220px-Survivor_Series_WarGames_2023_poster.jpg',
+  
+  // AEW 2025-2026
+  'aew-full-gear-2025': 'https://upload.wikimedia.org/wikipedia/en/thumb/9/97/AEW_Full_Gear_2023_logo.jpg/220px-AEW_Full_Gear_2023_logo.jpg',
+  'cagematch-431204': 'https://upload.wikimedia.org/wikipedia/en/thumb/5/55/AEW_Worlds_End_2023.jpg/220px-AEW_Worlds_End_2023.jpg', // Worlds End 2025
+  'revolution-2026': 'https://upload.wikimedia.org/wikipedia/en/thumb/d/d4/AEW_Revolution_2024.jpg/220px-AEW_Revolution_2024.jpg',
+  
+  // NJPW
+  'cagematch-426904': 'https://upload.wikimedia.org/wikipedia/en/thumb/3/35/Wrestle_Kingdom_17_poster.jpg/220px-Wrestle_Kingdom_17_poster.jpg', // Wrestle Kingdom 20
+  
+  // Note: These are using previous year's posters as placeholders
+  // Admins should update with 2026 posters when available via Admin Panel
 };
 
 // Helper function to get event poster/banner with fallback
@@ -1062,20 +963,10 @@ const WRESTLER_IMAGES = {
   'Cody Rhodes': 'https://upload.wikimedia.org/wikipedia/commons/4/4c/Cody_Rhodes_WWE_2016.jpg',
   'Finn Balor': 'https://upload.wikimedia.org/wikipedia/commons/c/c5/Finn_B%C3%A1lor_NXT_Champ.jpg',
   
-  // AEW - Real photos
-  'Jon Moxley': 'https://upload.wikimedia.org/wikipedia/commons/6/67/Dean_Ambrose_Axxess_2014.jpg',
-  'Kenny Omega': 'https://upload.wikimedia.org/wikipedia/commons/8/87/Kenny_Omega_2019_Show_1.jpg',
-  'Chris Jericho': 'https://upload.wikimedia.org/wikipedia/commons/0/04/Chris_Jericho_Axxess_2014.jpg',
-  'Sting': 'https://upload.wikimedia.org/wikipedia/commons/8/84/Sting_November_2014.jpg',
-  'Darby Allin': 'https://upload.wikimedia.org/wikipedia/commons/7/7d/Darby_Allin_2019.jpg',
-  'MJF': 'https://upload.wikimedia.org/wikipedia/commons/d/d7/Maxwell_Jacob_Friedman_2019.jpg',
-  'Adam Cole': 'https://upload.wikimedia.org/wikipedia/commons/3/3e/Adam_Cole_NXT_2019.jpg',
-  'Orange Cassidy': 'https://upload.wikimedia.org/wikipedia/commons/7/77/Orange_Cassidy_2019.jpg',
-  'Will Ospreay': 'https://upload.wikimedia.org/wikipedia/commons/1/1a/Will_Ospreay_at_Bound_for_Glory.jpg',
-  'Hangman Adam Page': 'https://upload.wikimedia.org/wikipedia/commons/b/b5/Adam_Page_2019.jpg',
-  'Mercedes Moné': 'https://upload.wikimedia.org/wikipedia/commons/9/90/Sasha_Banks_2016.jpg',
-  'Jamie Hayter': 'https://upload.wikimedia.org/wikipedia/commons/e/e0/Jamie_Hayter_2022.jpg',
-  'Toni Storm': 'https://upload.wikimedia.org/wikipedia/commons/a/a8/Toni_Storm_in_2018.jpg',
+  // AEW - (Wikimedia URLs were outdated/404, using fallback initials which look great)
+  // Note: Add working image URLs here as you find them
+  // 'Jon Moxley': 'url',
+  // 'Kenny Omega': 'url',
   
   // NJPW - Real photos  
   'Tetsuya Naito': 'https://upload.wikimedia.org/wikipedia/commons/4/46/Naito_Tetsuya_2022.jpg',
@@ -1461,215 +1352,70 @@ const BrandLogo = ({ id, className = "w-full h-full object-contain", logoUrl }) 
 };
 
 const WrestlerImage = ({ name, className, imageUrl }) => {
-  // Helper to check hardcoded images synchronously
-  // Note: We allow Wikimedia URLs from hardcoded images, but we'll download them to Storage
-  const getHardcodedImage = (wrestlerName) => {
-    let url = null;
-    // First try exact match
-    if (WRESTLER_IMAGES[wrestlerName]) {
-      url = WRESTLER_IMAGES[wrestlerName];
-    } else {
-      // Then try normalized match
-      const normalizedName = normalizeWrestlerName(wrestlerName);
-      for (const [key, urlValue] of Object.entries(WRESTLER_IMAGES)) {
-        if (normalizeWrestlerName(key) === normalizedName) {
-          url = urlValue;
-          break;
-        }
-      }
-    }
-    
-    // Skip Cagematch URLs (but allow Wikimedia - we'll download to Storage)
-    if (url && url.includes('cagematch.net')) {
-      return null; // Don't use Cagematch
-    }
-    return url;
-  };
-  
-  // Initialize with hardcoded image if available (synchronous check)
-  const initialHardcodedUrl = getHardcodedImage(name);
-  const [currentImageUrl, setCurrentImageUrl] = useState(initialHardcodedUrl);
-  const [imageSource, setImageSource] = useState(initialHardcodedUrl ? (initialHardcodedUrl.includes('wsrv.nl') || initialHardcodedUrl.includes('weserv.nl') ? 'proxy' : 'initial') : 'initial');
+  const [currentImageUrl, setCurrentImageUrl] = useState(null);
+  const [imageSource, setImageSource] = useState('loading');
   const [isLoading, setIsLoading] = useState(true);
   const retryCountRef = useRef(0);
-  const maxRetries = 3;
+  const maxRetries = 2;
   
   useEffect(() => {
-    // Reset state when name or imageUrl changes
     setIsLoading(true);
-    setImageSource('initial');
-    
-    // Priority order:
-    // 1. Hardcoded WRESTLER_IMAGES (checked synchronously above)
-    // 2. Provided imageUrl (if not from cagematch.net)
-    // 3. Firestore database (cached images)
-    // 4. Search multiple sources (Wikimedia, Wikipedia API)
-    // 5. Use proxy services
-    // 6. Fallback to initials
+    setImageSource('loading');
+    retryCountRef.current = 0;
     
     const loadImage = async () => {
-      // Step 1: Check hardcoded images FIRST (most reliable) - already checked in initial state
-      // But check again in case name changed
-      const hardcodedUrl = getHardcodedImage(name);
-      if (hardcodedUrl) {
-        // Use hardcoded URL immediately (don't wait for Storage check)
-        // For Wikimedia URLs, use them directly (they're reliable and public domain)
-        // For other URLs, proxy if needed
-        let urlToUse = hardcodedUrl;
-        let sourceType = 'initial';
-        
-        // If it's a Wikimedia URL, use it directly
-        // Otherwise, proxy external URLs
-        if (!hardcodedUrl.includes('wikimedia.org') && !hardcodedUrl.includes('wikipedia.org')) {
-          if (hardcodedUrl.startsWith('http://') || hardcodedUrl.startsWith('https://')) {
-            urlToUse = getProxiedImageUrl(hardcodedUrl, 400, 500, 'wsrv');
-            sourceType = 'proxy';
-          }
-        }
-        
-        setCurrentImageUrl(urlToUse);
-        setImageSource(sourceType);
-        
-        // Check Storage in the background (non-blocking) - if it exists, switch to it
-        // This avoids CORS errors blocking the image load
-        getImageFromStorage('wrestlers', name).then((storageUrl) => {
-          if (storageUrl) {
-            setCurrentImageUrl(storageUrl);
-            setImageSource('database');
-          }
-        }).catch(() => {
-          // Storage check failed (CORS or doesn't exist) - that's OK, we're using hardcoded URL
-        });
-        
-        // Download and upload to Storage in the background (non-blocking)
-        // This works for both Wikimedia and non-Wikimedia images
-        downloadAndUploadImage(hardcodedUrl, 'wrestlers', name).then((storageUrl) => {
-          if (storageUrl) {
-            // Update to use Storage URL once uploaded (this is the preferred source)
-            setCurrentImageUrl(storageUrl);
-            setImageSource('database');
-          }
-        }).catch((error) => {
-          if (process.env.NODE_ENV === 'development') {
-            console.log(`Background upload failed for ${name}:`, error);
-          }
-        });
+      // Strategy 1: Try hardcoded images first (most reliable)
+      const hardcodedUrl = WRESTLER_IMAGES[name] || WRESTLER_IMAGES[normalizeWrestlerName(name)];
+      if (hardcodedUrl && !hardcodedUrl.includes('cagematch.net')) {
+        setCurrentImageUrl(hardcodedUrl);
+        setImageSource('hardcoded');
         return;
       }
       
-      // Step 2: Check provided imageUrl (but only if hardcoded image wasn't found)
-      // If hardcoded image exists, we already returned above, so we can try imageUrl as backup
+      // Strategy 2: Try provided imageUrl (proxy if it's Firebase Storage or external)
       if (imageUrl) {
-        // Skip Wikimedia and Wikipedia URLs (but allow Cagematch via proxy)
-        if (imageUrl.includes('wikimedia.org') || imageUrl.includes('wikipedia.org')) {
-          // Don't use these sources - continue to other sources
-        } else {
-          // Use proxy for external URLs to avoid CORS
-          let urlToUse = imageUrl;
-          let sourceType = 'initial';
-          if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-            // Proxy ALL external URLs including Cagematch
-            urlToUse = getProxiedImageUrl(imageUrl, 400, 500, 'wsrv');
-            sourceType = 'proxy';
-          }
-          setCurrentImageUrl(urlToUse);
-          setImageSource(sourceType);
-          // Save to Firestore for future use (but not Wikimedia/Wikipedia)
-          if (!imageUrl.includes('wikimedia.org') && !imageUrl.includes('wikipedia.org')) {
-            saveImageToFirestore('wrestlers', name, imageUrl);
-          }
+        if (imageUrl.includes('firebasestorage.googleapis.com')) {
+          // Firebase Storage URL - use directly
+          setCurrentImageUrl(imageUrl);
+          setImageSource('storage');
+          return;
+        } else if (!imageUrl.includes('wikimedia.org') && !imageUrl.includes('wikipedia.org')) {
+          // External URL (including Cagematch) - proxy it
+          const proxiedUrl = getProxiedImageUrl(imageUrl, 400, 500, 'wsrv');
+          setCurrentImageUrl(proxiedUrl);
+          setImageSource('proxy');
           return;
         }
       }
       
-      // Step 3: Check Firestore database (with name normalization) - skip Cagematch and Wikimedia
+      // Strategy 3: Try Firestore (images saved by scraper)
       try {
         const firestoreUrl = await getImageFromFirestore('wrestlers', name);
         if (firestoreUrl) {
-          // Skip Wikimedia and Wikipedia URLs (but allow Cagematch via proxy)
-          if (firestoreUrl.includes('wikimedia.org') || firestoreUrl.includes('wikipedia.org')) {
-            // Don't use these sources - continue to other sources
-          } else {
-            // Use proxy for all external URLs including Cagematch
-            let urlToUse = firestoreUrl;
-            let sourceType = 'database';
-            if (firestoreUrl.startsWith('http://') || firestoreUrl.startsWith('https://')) {
-              urlToUse = getProxiedImageUrl(firestoreUrl, 400, 500, 'wsrv');
-              sourceType = 'proxy';
-            }
-            setCurrentImageUrl(urlToUse);
-            setImageSource(sourceType);
+          if (firestoreUrl.includes('firebasestorage.googleapis.com')) {
+            // Firebase Storage URL - use directly
+            setCurrentImageUrl(firestoreUrl);
+            setImageSource('storage');
             return;
-          }
-        }
-        // Try normalized name variations
-        const normalizedName = normalizeWrestlerName(name);
-        const nameVariations = [
-          name.trim(),
-          name.replace(/\./g, ''),
-          name.replace(/\./g, '').trim(),
-          normalizedName
-        ];
-        for (const nameVar of nameVariations) {
-          if (nameVar !== name) {
-            const altUrl = await getImageFromFirestore('wrestlers', nameVar);
-            if (altUrl) {
-              setCurrentImageUrl(altUrl);
-              setImageSource('database');
-              return;
-            }
-          }
-        }
-      } catch (error) {
-        console.log(`Firestore lookup failed for ${name}`);
-      }
-      
-      // Step 5: Search multiple sources
-      try {
-        const foundUrl = await searchWrestlerImage(name);
-        if (foundUrl) {
-          // Skip Wikimedia URLs even if found by search
-          if (foundUrl.includes('wikimedia.org') || foundUrl.includes('wikipedia.org')) {
-            // Don't use Wikimedia - continue to fallback
-          } else {
-            // Use proxy for external URLs (but not for Wikimedia)
-            let urlToUse = foundUrl;
-            let sourceType = 'database';
-            if (foundUrl.startsWith('http://') || foundUrl.startsWith('https://')) {
-              // Only proxy if it's not already a Wikimedia URL
-              if (!foundUrl.includes('wikimedia.org') && !foundUrl.includes('wikipedia.org')) {
-                urlToUse = getProxiedImageUrl(foundUrl, 400, 500, 'wsrv');
-                sourceType = 'proxy';
-              }
-            }
-            setCurrentImageUrl(urlToUse);
-            setImageSource(sourceType);
-            // Download and cache to Storage in the background (non-blocking)
-            // Use original URL for upload (only if not Wikimedia)
-            if (!foundUrl.includes('wikimedia.org') && !foundUrl.includes('wikipedia.org')) {
-              downloadAndUploadImage(foundUrl, 'wrestlers', name).then((storageUrl) => {
-                if (storageUrl) {
-                  setCurrentImageUrl(storageUrl);
-                  setImageSource('database');
-                }
-              }).catch(() => {
-                // Silently fail background upload
-              });
-            }
+          } else if (!firestoreUrl.includes('wikimedia.org') && !firestoreUrl.includes('wikipedia.org')) {
+            // External URL - proxy it
+            const proxiedUrl = getProxiedImageUrl(firestoreUrl, 400, 500, 'wsrv');
+            setCurrentImageUrl(proxiedUrl);
+            setImageSource('proxy');
             return;
           }
         }
       } catch (error) {
-        console.log(`Image search failed for ${name}`);
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`Firestore lookup failed for ${name}:`, error);
+        }
       }
       
-      // Step 6: No image found - will use fallback
+      // Strategy 4: Fallback to initials
       setCurrentImageUrl(null);
       setImageSource('fallback');
     };
     
-    // Reset retry count when loading new image
-    retryCountRef.current = 0;
     loadImage();
   }, [name, imageUrl]);
   
@@ -1706,150 +1452,26 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
     );
   }
   
-  // Try alternative proxy if current one fails
   const handleImageError = () => {
     retryCountRef.current += 1;
     
     if (retryCountRef.current > maxRetries) {
-      if (process.env.NODE_ENV === 'development') {
-        console.log(`🖼️ Max retries reached for "${name}", using fallback`);
-      }
       setImageSource('fallback');
       return;
     }
     
-    if (process.env.NODE_ENV === 'development') {
-      console.log(`🖼️ Image error for "${name}", source: ${imageSource}, retry: ${retryCountRef.current}/${maxRetries}`);
-    }
-    
-    // Strategy 1: If Wikimedia URL failed, try alternative sources immediately
-    if ((imageSource === 'initial' || imageSource === 'database') && currentImageUrl) {
-      const isWikimedia = currentImageUrl.includes('wikimedia.org') || currentImageUrl.includes('wikipedia.org');
-      if (isWikimedia && retryCountRef.current === 1) {
-        // Wikimedia URL failed - try searching for alternative sources
-        searchWrestlerImage(name).then((foundUrl) => {
-          if (foundUrl && !foundUrl.includes('wikimedia.org') && !foundUrl.includes('wikipedia.org') && foundUrl !== currentImageUrl) {
-            let urlToUse = foundUrl;
-            let sourceType = 'database';
-            if (foundUrl.startsWith('http://') || foundUrl.startsWith('https://')) {
-              urlToUse = getProxiedImageUrl(foundUrl, 400, 500, 'wsrv');
-              sourceType = 'proxy';
-            }
-            setCurrentImageUrl(urlToUse);
-            setImageSource(sourceType);
-            retryCountRef.current = 0; // Reset on success
-            return;
-          } else {
-            // No alternative found, fall back to initials
-            setImageSource('fallback');
-          }
-        }).catch(() => {
-          // Search failed, fall back to initials
-          setImageSource('fallback');
-        });
+    // Try alternative proxy service
+    if (imageSource === 'proxy' && imageUrl) {
+      const proxyType = currentImageUrl?.includes('wsrv.nl') ? 'images' : 'wsrv';
+      const proxied = getProxiedImageUrl(imageUrl, 400, 500, proxyType);
+      if (proxied !== currentImageUrl) {
+        setCurrentImageUrl(proxied);
         return;
       }
     }
     
-    // Strategy 2: Try alternative proxy if current one failed (but skip Wikimedia URLs)
-    if (imageSource === 'proxy' && currentImageUrl) {
-      // Try alternative proxy service
-      let originalUrl = currentImageUrl.includes('wsrv.nl') || currentImageUrl.includes('weserv.nl')
-        ? (imageUrl || decodeURIComponent(currentImageUrl.match(/url=([^&]+)/)?.[1] || ''))
-        : currentImageUrl;
-      
-      // Skip if original URL is Wikimedia/Wikipedia (but allow Cagematch via proxy)
-      if (originalUrl && 
-          !originalUrl.includes('wikimedia.org') && 
-          !originalUrl.includes('wikipedia.org')) {
-        const proxyType = currentImageUrl.includes('wsrv.nl') ? 'images' : 'wsrv';
-        const proxied = getProxiedImageUrl(originalUrl, 400, 500, proxyType);
-        if (proxied && proxied !== currentImageUrl) {
-          setCurrentImageUrl(proxied);
-          setImageSource('proxy');
-          return;
-        }
-      } else {
-        // If it's a Wikimedia URL, try alternative sources
-        if (originalUrl && (originalUrl.includes('wikimedia.org') || originalUrl.includes('wikipedia.org'))) {
-          if (retryCountRef.current === 1) {
-            searchWrestlerImage(name).then((foundUrl) => {
-              if (foundUrl && !foundUrl.includes('wikimedia.org') && !foundUrl.includes('wikipedia.org') && foundUrl !== currentImageUrl) {
-                let urlToUse = foundUrl;
-                let sourceType = 'database';
-                if (foundUrl.startsWith('http://') || foundUrl.startsWith('https://')) {
-                  urlToUse = getProxiedImageUrl(foundUrl, 400, 500, 'wsrv');
-                  sourceType = 'proxy';
-                }
-                setCurrentImageUrl(urlToUse);
-                setImageSource(sourceType);
-                retryCountRef.current = 0;
-                return;
-              } else {
-                setImageSource('fallback');
-              }
-            }).catch(() => {
-              setImageSource('fallback');
-            });
-            return;
-          } else {
-            setImageSource('fallback');
-            return;
-          }
-        }
-      }
-    }
-    
-    // Strategy 3: Try Storage again (might have been uploaded in background)
-    if (imageSource !== 'database') {
-      getImageFromStorage('wrestlers', name).then((storageUrl) => {
-        if (storageUrl && storageUrl !== currentImageUrl) {
-          setCurrentImageUrl(storageUrl);
-          setImageSource('database');
-          retryCountRef.current = 0; // Reset on success
-          return;
-        }
-      }).catch(() => {
-        // Continue to next strategy
-      });
-    }
-    
-    // Strategy 4: Try Firestore again (might have been updated)
-    if (imageSource !== 'database') {
-      getImageFromFirestore('wrestlers', name).then((firestoreUrl) => {
-        if (firestoreUrl && firestoreUrl !== currentImageUrl) {
-          // Proxy Cagematch URLs
-          const urlToUse = firestoreUrl.includes('cagematch.net') 
-            ? getProxiedImageUrl(firestoreUrl, 400, 500, 'wsrv')
-            : firestoreUrl;
-          setCurrentImageUrl(urlToUse);
-          setImageSource('database');
-          retryCountRef.current = 0;
-          return;
-        }
-      }).catch(() => {
-        // Continue to next strategy
-      });
-    }
-    
-    // Strategy 5: Try searching again (might find new source)
-    if (retryCountRef.current === 2) {
-      searchWrestlerImage(name).then((foundUrl) => {
-        if (foundUrl && foundUrl !== currentImageUrl) {
-          setCurrentImageUrl(foundUrl);
-          setImageSource('database');
-          retryCountRef.current = 0;
-          return;
-        }
-      }).catch(() => {
-        // Fall through to fallback
-      });
-    }
-    
-    // Strategy 6: If all else fails, use fallback
-    if (retryCountRef.current >= maxRetries) {
-      setImageSource('fallback');
-    }
+    // Give up and use fallback
+    setImageSource('fallback');
   };
   
   return (
@@ -1917,6 +1539,1385 @@ const EventBanner = ({ event, className = "w-full h-full object-cover", fallback
       crossOrigin="anonymous"
       loading="lazy"
     />
+  );
+};
+
+// --- ADMIN PANEL COMPONENT ---
+
+const AdminPanel = ({ events, promotions, db, appId, userProfile }) => {
+  // Tab management (now only 3 tabs: events, analytics, users)
+  const [adminTab, setAdminTab] = useState('events');
+  
+  // Existing event editing state
+  const [selectedEvent, setSelectedEvent] = useState(null);
+  const [editingEvent, setEditingEvent] = useState(null);
+  const [saveMessage, setSaveMessage] = useState('');
+  
+  // Modal/View state for Events tab
+  const [showCreateEventModal, setShowCreateEventModal] = useState(false);
+  const [showBulkWinnersModal, setShowBulkWinnersModal] = useState(false);
+  
+  // Event Creation state  
+  const [creatingEvent, setCreatingEvent] = useState(false);
+  const [newEvent, setNewEvent] = useState({
+    name: '',
+    date: '',
+    venue: '',
+    promotionId: 'wwe',
+    isPPV: true,
+    posterUrl: '',
+    bannerUrl: ''
+  });
+  const [newMatches, setNewMatches] = useState([]);
+  
+  // Bulk Winners state
+  const [bulkEventId, setBulkEventId] = useState('');
+  const [bulkWinnersText, setBulkWinnersText] = useState('');
+  const [bulkProcessing, setBulkProcessing] = useState(false);
+  
+  // Analytics state
+  const [analyticsData, setAnalyticsData] = useState(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  
+  // User Management state
+  const [users, setUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [userSearch, setUserSearch] = useState('');
+  const [editingUserId, setEditingUserId] = useState(null);
+  const [editingUserPoints, setEditingUserPoints] = useState(0);
+  const [showCreateUserModal, setShowCreateUserModal] = useState(false);
+  const [newUserData, setNewUserData] = useState({
+    email: '',
+    password: '',
+    displayName: '',
+    isAdmin: false
+  });
+  const [creatingUser, setCreatingUser] = useState(false);
+  
+  const handleEditEvent = (event) => {
+    setEditingEvent({...event});
+    setSelectedEvent(event);
+    setAdminTab('events');
+  };
+  
+  const handleSaveEvent = async () => {
+    if (!editingEvent) return;
+    
+    try {
+      const eventRef = doc(db, 'artifacts', appId, 'public', 'data', 'events', editingEvent.id);
+      const updateData = {
+        name: editingEvent.name,
+        date: editingEvent.date,
+        venue: editingEvent.venue,
+        matches: editingEvent.matches,
+        manuallyEdited: true, // Mark as manually edited to prevent scraper overwrites
+        lastEditedBy: userProfile?.displayName || userProfile?.email || 'Admin',
+        lastEditedAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      };
+      
+      // Add poster/banner URLs if provided
+      if (editingEvent.posterUrl) {
+        updateData.posterUrl = editingEvent.posterUrl;
+      }
+      if (editingEvent.bannerUrl) {
+        updateData.bannerUrl = editingEvent.bannerUrl;
+      }
+      
+      await updateDoc(eventRef, updateData);
+      
+      setSaveMessage('✅ Event saved successfully!');
+      setTimeout(() => setSaveMessage(''), 3000);
+      setEditingEvent(null);
+      setSelectedEvent(null);
+    } catch (error) {
+      setSaveMessage(`❌ Error: ${error.message}`);
+      setTimeout(() => setSaveMessage(''), 5000);
+    }
+  };
+  
+  const handleSetMatchWinner = (matchIndex, winner) => {
+    if (!editingEvent) return;
+    const updatedMatches = [...editingEvent.matches];
+    updatedMatches[matchIndex] = {
+      ...updatedMatches[matchIndex],
+      winner: winner
+    };
+    setEditingEvent({
+      ...editingEvent,
+      matches: updatedMatches
+    });
+  };
+  
+  const handleDeleteEvent = async (eventId) => {
+    if (!confirm('Are you sure you want to delete this event?')) return;
+    
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'events', eventId));
+      setSaveMessage('✅ Event deleted');
+      setTimeout(() => setSaveMessage(''), 3000);
+      setSelectedEvent(null);
+      setEditingEvent(null);
+    } catch (error) {
+      setSaveMessage(`❌ Error: ${error.message}`);
+    }
+  };
+  
+  // Event Creation Handlers
+  const handleCreateEvent = async () => {
+    if (!newEvent.name || !newEvent.date) {
+      setSaveMessage('❌ Name and date are required');
+      return;
+    }
+    
+    try {
+      const eventId = newEvent.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '-' + Date.now();
+      const eventRef = doc(db, 'artifacts', appId, 'public', 'data', 'events', eventId);
+      
+      await setDoc(eventRef, {
+        id: eventId,
+        name: newEvent.name,
+        date: newEvent.date,
+        venue: newEvent.venue || 'TBA',
+        promotionId: newEvent.promotionId,
+        promoId: newEvent.promotionId,
+        promotionName: promotions.find(p => p.id === newEvent.promotionId)?.name || '',
+        isPPV: newEvent.isPPV,
+        posterUrl: newEvent.posterUrl || null,
+        bannerUrl: newEvent.bannerUrl || null,
+        matches: newMatches,
+        manuallyEdited: true,
+        createdBy: userProfile?.displayName || userProfile?.email || 'Admin',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      
+      setSaveMessage('✅ Event created successfully!');
+      setTimeout(() => {
+        setSaveMessage('');
+        setCreatingEvent(false);
+        setNewEvent({ name: '', date: '', venue: '', promotionId: 'wwe', isPPV: true, posterUrl: '', bannerUrl: '' });
+        setNewMatches([]);
+      }, 2000);
+    } catch (error) {
+      setSaveMessage(`❌ Error: ${error.message}`);
+    }
+  };
+  
+  const addMatchToNew = () => {
+    setNewMatches([...newMatches, { p1: '', p2: '', type: 'Singles Match', title: '' }]);
+  };
+  
+  const updateNewMatch = (index, field, value) => {
+    const updated = [...newMatches];
+    updated[index] = { ...updated[index], [field]: value };
+    setNewMatches(updated);
+  };
+  
+  const removeNewMatch = (index) => {
+    setNewMatches(newMatches.filter((_, i) => i !== index));
+  };
+  
+  // Bulk Winners Handlers
+  const handleBulkWinners = async () => {
+    if (!bulkEventId || !bulkWinnersText) {
+      setSaveMessage('❌ Select event and provide winners');
+      return;
+    }
+    
+    setBulkProcessing(true);
+    
+    try {
+      const event = events.find(e => e.id === bulkEventId);
+      if (!event || !event.matches) {
+        setSaveMessage('❌ Event not found or has no matches');
+        setBulkProcessing(false);
+        return;
+      }
+      
+      // Parse CSV format: "Match 1, Winner Name" or "1, Winner Name"
+      const lines = bulkWinnersText.trim().split('\n');
+      const updatedMatches = [...event.matches];
+      let updatedCount = 0;
+      
+      for (const line of lines) {
+        const [matchNum, winner] = line.split(',').map(s => s.trim());
+        const index = parseInt(matchNum) - 1;
+        
+        if (index >= 0 && index < updatedMatches.length && winner) {
+          updatedMatches[index] = { ...updatedMatches[index], winner };
+          updatedCount++;
+        }
+      }
+      
+      const eventRef = doc(db, 'artifacts', appId, 'public', 'data', 'events', bulkEventId);
+      await updateDoc(eventRef, {
+        matches: updatedMatches,
+        manuallyEdited: true,
+        lastEditedBy: userProfile?.displayName || userProfile?.email || 'Admin',
+        lastEditedAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      
+      setSaveMessage(`✅ Updated ${updatedCount} match winner(s)!`);
+      setTimeout(() => {
+        setSaveMessage('');
+        setBulkWinnersText('');
+      }, 3000);
+    } catch (error) {
+      setSaveMessage(`❌ Error: ${error.message}`);
+    } finally {
+      setBulkProcessing(false);
+    }
+  };
+  
+  // Analytics Handlers
+  const loadAnalytics = async () => {
+    setAnalyticsLoading(true);
+    
+    try {
+      // Get all users
+      const usersRef = collection(db, 'users');
+      const usersSnap = await getDocs(usersRef);
+      const totalUsers = usersSnap.size;
+      
+      // Get predictions
+      const predicRef = collection(db, 'artifacts', appId, 'public', 'predictions');
+      const predicSnap = await getDocs(predicRef);
+      const totalPredictions = predicSnap.size;
+      
+      // Calculate active users (with at least 1 prediction)
+      const usersWithPreds = new Set();
+      predicSnap.forEach(doc => {
+        const userId = doc.id.split('-')[0];
+        usersWithPreds.add(userId);
+      });
+      
+      // Get event participation
+      const eventParticipation = {};
+      predicSnap.forEach(doc => {
+        const data = doc.data();
+        Object.keys(data || {}).forEach(eventId => {
+          eventParticipation[eventId] = (eventParticipation[eventId] || 0) + 1;
+        });
+      });
+      
+      const topEvents = Object.entries(eventParticipation)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([eventId, count]) => {
+          const event = events.find(e => e.id === eventId);
+          return { name: event?.name || eventId, predictions: count };
+        });
+      
+      setAnalyticsData({
+        totalUsers,
+        activeUsers: usersWithPreds.size,
+        totalPredictions,
+        avgPerUser: (totalPredictions / totalUsers).toFixed(1),
+        topEvents
+      });
+    } catch (error) {
+      console.error('Analytics error:', error);
+      setSaveMessage(`❌ Error loading analytics: ${error.message}`);
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
+  
+  // User Management Handlers
+  const loadUsers = async () => {
+    setUsersLoading(true);
+    
+    try {
+      const usersRef = collection(db, 'users');
+      const usersSnap = await getDocs(usersRef);
+      
+      const usersList = [];
+      usersSnap.forEach(doc => {
+        usersList.push({ id: doc.id, ...doc.data() });
+      });
+      
+      // Sort by creation date (newest first)
+      usersList.sort((a, b) => {
+        const dateA = a.createdAt?.toDate?.() || new Date(0);
+        const dateB = b.createdAt?.toDate?.() || new Date(0);
+        return dateB - dateA;
+      });
+      
+      setUsers(usersList);
+    } catch (error) {
+      console.error('Users error:', error);
+      setSaveMessage(`❌ Error loading users: ${error.message}`);
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+  
+  const handleMakeAdmin = async (userId) => {
+    if (!confirm('Grant admin privileges to this user?')) return;
+    
+    try {
+      await updateDoc(doc(db, 'users', userId), {
+        isAdmin: true,
+        updatedAt: serverTimestamp()
+      });
+      setSaveMessage('✅ Admin privileges granted');
+      loadUsers(); // Refresh
+    } catch (error) {
+      setSaveMessage(`❌ Error: ${error.message}`);
+    }
+  };
+  
+  const handleRevokeAdmin = async (userId) => {
+    if (!confirm('Revoke admin privileges from this user?')) return;
+    
+    try {
+      await updateDoc(doc(db, 'users', userId), {
+        isAdmin: false,
+        updatedAt: serverTimestamp()
+      });
+      setSaveMessage('✅ Admin privileges revoked');
+      loadUsers(); // Refresh
+    } catch (error) {
+      setSaveMessage(`❌ Error: ${error.message}`);
+    }
+  };
+  
+  const handleDeleteUser = async (userId, userEmail) => {
+    if (!confirm(`⚠️ DELETE USER: ${userEmail}?\n\nThis will:\n• Delete their account\n• Delete all their predictions\n• Delete all their data\n\nThis action CANNOT be undone!`)) return;
+    
+    try {
+      console.log(`🗑️ Starting deletion for user: ${userId}`);
+      
+      // Delete user document from /users collection
+      try {
+        await deleteDoc(doc(db, 'users', userId));
+        console.log('✅ Deleted from /users collection');
+      } catch (error) {
+        console.error('⚠️ Error deleting from /users:', error);
+      }
+      
+      // Delete user profile from public data
+      try {
+        const userProfileRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', userId);
+        await deleteDoc(userProfileRef);
+        console.log('✅ Deleted user profile');
+      } catch (error) {
+        console.error('⚠️ Error deleting user profile:', error);
+      }
+      
+      // Delete predictions (all sub-collections)
+      try {
+        const predictionsRef = collection(db, 'artifacts', appId, 'users', userId, 'predictions');
+        const predictionsSnap = await getDocs(predictionsRef);
+        console.log(`📊 Found ${predictionsSnap.size} predictions to delete`);
+        const deletePromises = predictionsSnap.docs.map(doc => deleteDoc(doc.ref));
+        await Promise.all(deletePromises);
+        console.log('✅ Deleted all predictions');
+      } catch (error) {
+        console.error('⚠️ Error deleting predictions:', error);
+      }
+      
+      // Delete locked events
+      try {
+        const lockedEventsRef = collection(db, 'artifacts', appId, 'users', userId, 'lockedEvents');
+        const lockedEventsSnap = await getDocs(lockedEventsRef);
+        if (lockedEventsSnap.size > 0) {
+          const deletePromises = lockedEventsSnap.docs.map(doc => deleteDoc(doc.ref));
+          await Promise.all(deletePromises);
+          console.log('✅ Deleted locked events');
+        }
+      } catch (error) {
+        console.error('⚠️ Error deleting locked events:', error);
+      }
+      
+      setSaveMessage('✅ User deleted successfully');
+      loadUsers(); // Refresh
+    } catch (error) {
+      console.error('❌ Error deleting user:', error);
+      setSaveMessage(`❌ Error deleting user: ${error.message}`);
+    }
+  };
+  
+  const handleClearPredictions = async (userId, userName) => {
+    if (!confirm(`Clear ALL predictions for ${userName}?\n\nThis will:\n• Delete all their picks\n• Reset their score to 0\n• Keep their account active\n\nContinue?`)) return;
+    
+    try {
+      // Delete all predictions
+      const predictionsRef = collection(db, 'artifacts', appId, 'users', userId, 'predictions');
+      const predictionsSnap = await getDocs(predictionsRef);
+      const deletePromises = predictionsSnap.docs.map(doc => deleteDoc(doc.ref));
+      await Promise.all(deletePromises);
+      
+      // Reset score in user profile
+      const userProfileRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', userId);
+      await updateDoc(userProfileRef, {
+        score: 0,
+        updatedAt: serverTimestamp()
+      });
+      
+      setSaveMessage('✅ Predictions cleared successfully');
+    } catch (error) {
+      setSaveMessage(`❌ Error clearing predictions: ${error.message}`);
+    }
+  };
+  
+  const handleSaveUserPoints = async (userId) => {
+    try {
+      const userProfileRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', userId);
+      await updateDoc(userProfileRef, {
+        score: parseInt(editingUserPoints) || 0,
+        updatedAt: serverTimestamp()
+      });
+      
+      setSaveMessage('✅ Points updated successfully');
+      setEditingUserId(null);
+      loadUsers(); // Refresh to show updated score
+    } catch (error) {
+      setSaveMessage(`❌ Error updating points: ${error.message}`);
+    }
+  };
+  
+  const handleCreateUser = async () => {
+    if (!newUserData.email || !newUserData.password) {
+      setSaveMessage('❌ Email and password are required');
+      return;
+    }
+    
+    if (newUserData.password.length < 6) {
+      setSaveMessage('❌ Password must be at least 6 characters');
+      return;
+    }
+    
+    setCreatingUser(true);
+    try {
+      // Note: We need to create a secondary auth instance to avoid signing out the current admin
+      // This is a limitation of Firebase Client SDK - ideally this would use Admin SDK via a Cloud Function
+      
+      // For now, create the user profile in Firestore with a "pending" flag
+      // The user will complete signup themselves
+      const userId = `temp-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+      
+      // Create user profile in Firestore
+      const userProfileRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', userId);
+      await setDoc(userProfileRef, {
+        email: newUserData.email,
+        displayName: newUserData.displayName || 'New User',
+        score: 0,
+        subscribedPromotions: ['wwe', 'aew', 'njpw'], // Default subscriptions
+        createdAt: serverTimestamp(),
+        pending: true, // Flag indicating user needs to complete signup
+        tempPassword: newUserData.password, // Temporary - will be removed on actual signup
+        isAdmin: newUserData.isAdmin
+      });
+      
+      // Also create in /users collection for admin access
+      const userDocRef = doc(db, 'users', userId);
+      await setDoc(userDocRef, {
+        email: newUserData.email,
+        displayName: newUserData.displayName || 'New User',
+        isAdmin: newUserData.isAdmin,
+        createdAt: serverTimestamp(),
+        pending: true
+      });
+      
+      setSaveMessage(`✅ User profile created! Email: ${newUserData.email}, Temp Password: ${newUserData.password}. User should sign up with these credentials.`);
+      setShowCreateUserModal(false);
+      setNewUserData({ email: '', password: '', displayName: '', isAdmin: false });
+      loadUsers(); // Refresh user list
+    } catch (error) {
+      setSaveMessage(`❌ Error creating user: ${error.message}`);
+    } finally {
+      setCreatingUser(false);
+    }
+  };
+  
+  // Load data when tabs change
+  useEffect(() => {
+    if (adminTab === 'analytics' && !analyticsData) {
+      loadAnalytics();
+    }
+    if (adminTab === 'users' && users.length === 0) {
+      loadUsers();
+    }
+  }, [adminTab]);
+  
+  // Filter events by date
+  const upcomingEvents = events.filter(e => new Date(e.date) >= new Date()).sort((a, b) => new Date(a.date) - new Date(b.date));
+  const pastEvents = events.filter(e => new Date(e.date) < new Date()).sort((a, b) => new Date(b.date) - new Date(a.date));
+  
+  // Filter users by search
+  const filteredUsers = users.filter(u => 
+    (u.displayName || '').toLowerCase().includes(userSearch.toLowerCase()) ||
+    (u.email || '').toLowerCase().includes(userSearch.toLowerCase())
+  );
+  
+  return (
+    <div className="p-6 pb-24 max-w-6xl mx-auto">
+      <div className="mb-8">
+        <h1 className="text-3xl font-black text-white flex items-center gap-3 mb-2">
+          <Shield className="text-red-500" size={32} />
+          Admin Panel
+        </h1>
+        <p className="text-slate-400">Manage events, matches, users, and analytics</p>
+      </div>
+      
+      {/* Admin Tabs */}
+      <div className="mb-6 flex gap-2">
+        <button
+          onClick={() => setAdminTab('events')}
+          className={`flex-1 px-6 py-3 rounded-xl font-bold transition-all ${
+            adminTab === 'events' 
+              ? 'bg-red-600 text-white shadow-lg shadow-red-600/50' 
+              : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+          }`}
+        >
+          📅 Events
+        </button>
+        <button
+          onClick={() => setAdminTab('analytics')}
+          className={`flex-1 px-6 py-3 rounded-xl font-bold transition-all ${
+            adminTab === 'analytics' 
+              ? 'bg-red-600 text-white shadow-lg shadow-red-600/50' 
+              : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+          }`}
+        >
+          📊 Analytics
+        </button>
+        <button
+          onClick={() => setAdminTab('users')}
+          className={`flex-1 px-6 py-3 rounded-xl font-bold transition-all ${
+            adminTab === 'users' 
+              ? 'bg-red-600 text-white shadow-lg shadow-red-600/50' 
+              : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+          }`}
+        >
+          👥 Users
+        </button>
+      </div>
+      
+      {saveMessage && (
+        <div className="mb-6 p-4 bg-slate-800 border border-slate-700 rounded-lg text-white">
+          {saveMessage}
+        </div>
+      )}
+      
+      {/* ==================== EVENTS TAB ==================== */}
+      {adminTab === 'events' && (
+        <>
+          {/* Action Buttons */}
+          {!editingEvent && !showCreateEventModal && !showBulkWinnersModal && (
+            <div className="flex gap-3 mb-6">
+              <button
+                onClick={() => setShowCreateEventModal(true)}
+                className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-6 rounded-xl transition-all shadow-lg shadow-green-600/30 flex items-center justify-center gap-2"
+              >
+                <PlusCircle size={20} />
+                Create New Event
+              </button>
+              <button
+                onClick={() => setShowBulkWinnersModal(true)}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-6 rounded-xl transition-all shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2"
+              >
+                <Upload size={20} />
+                Bulk Winners
+              </button>
+            </div>
+          )}
+          
+          {/* Edit Event Form */}
+          {editingEvent ? (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-black text-white">Edit Event</h2>
+            <button
+              onClick={() => { setEditingEvent(null); setSelectedEvent(null); }}
+              className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
+            >
+              <XIcon className="text-white" size={20} />
+            </button>
+          </div>
+          
+          <div className="space-y-4 mb-6">
+            <div>
+              <label className="block text-sm font-bold text-slate-300 mb-2">Event Name</label>
+              <input
+                type="text"
+                value={editingEvent.name}
+                onChange={(e) => setEditingEvent({...editingEvent, name: e.target.value})}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-bold text-slate-300 mb-2">Date</label>
+              <input
+                type="text"
+                value={editingEvent.date}
+                onChange={(e) => setEditingEvent({...editingEvent, date: e.target.value})}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
+                placeholder="Jan 4, 2026"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-bold text-slate-300 mb-2">Venue</label>
+              <input
+                type="text"
+                value={editingEvent.venue || ''}
+                onChange={(e) => setEditingEvent({...editingEvent, venue: e.target.value})}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
+                placeholder="Tokyo Dome, Tokyo, Japan"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-bold text-slate-300 mb-2">
+                Poster URL <span className="text-slate-500 font-normal text-xs">(optional)</span>
+              </label>
+              <input
+                type="url"
+                value={editingEvent.posterUrl || ''}
+                onChange={(e) => setEditingEvent({...editingEvent, posterUrl: e.target.value})}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white text-sm"
+                placeholder="https://upload.wikimedia.org/..."
+              />
+              <p className="text-xs text-slate-500 mt-1">Event poster image (Wikipedia, official site, etc.)</p>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-bold text-slate-300 mb-2">
+                Banner URL <span className="text-slate-500 font-normal text-xs">(optional)</span>
+              </label>
+              <input
+                type="url"
+                value={editingEvent.bannerUrl || ''}
+                onChange={(e) => setEditingEvent({...editingEvent, bannerUrl: e.target.value})}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white text-sm"
+                placeholder="https://..."
+              />
+              <p className="text-xs text-slate-500 mt-1">Wide banner/header image for the event</p>
+            </div>
+          </div>
+          
+          {editingEvent.matches && editingEvent.matches.length > 0 && (
+            <div className="mb-6">
+              <h3 className="text-xl font-black text-white mb-4">Match Winners</h3>
+              <div className="space-y-3">
+                {editingEvent.matches.map((match, idx) => (
+                  <div key={idx} className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+                    <div className="text-sm font-bold text-slate-400 mb-2">{match.title || match.type}</div>
+                    <div className="text-white mb-3">{match.p1} vs {match.p2}</div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleSetMatchWinner(idx, match.p1)}
+                        className={`flex-1 px-4 py-2 rounded-lg font-bold transition-colors ${
+                          match.winner === match.p1
+                            ? 'bg-green-600 text-white'
+                            : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                        }`}
+                      >
+                        {match.p1}
+                      </button>
+                      <button
+                        onClick={() => handleSetMatchWinner(idx, match.p2)}
+                        className={`flex-1 px-4 py-2 rounded-lg font-bold transition-colors ${
+                          match.winner === match.p2
+                            ? 'bg-green-600 text-white'
+                            : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                        }`}
+                      >
+                        {match.p2}
+                      </button>
+                      {match.winner && (
+                        <button
+                          onClick={() => handleSetMatchWinner(idx, null)}
+                          className="px-4 py-2 bg-red-600/20 text-red-400 rounded-lg font-bold hover:bg-red-600/30 transition-colors"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          
+          <div className="bg-green-900/20 border border-green-700 rounded-lg p-3 mb-4">
+            <p className="text-xs text-green-400 flex items-center gap-2">
+              <Shield size={14} />
+              <span>Saved changes will be protected from scraper overwrites</span>
+            </p>
+          </div>
+          
+          <div className="flex gap-3">
+            <button
+              onClick={handleSaveEvent}
+              className="flex-1 bg-green-600 hover:bg-green-700 text-white font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-colors"
+            >
+              <Save size={20} />
+              Save Changes
+            </button>
+            <button
+              onClick={() => handleDeleteEvent(editingEvent.id)}
+              className="px-6 bg-red-600/20 hover:bg-red-600/30 text-red-400 font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-colors"
+            >
+              <Trash2 size={20} />
+              Delete
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="mb-8">
+            <h2 className="text-2xl font-black text-white mb-4">Upcoming Events</h2>
+            <div className="grid gap-4">
+              {upcomingEvents.slice(0, 10).map(event => (
+                <div
+                  key={event.id}
+                  className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-slate-700 transition-colors"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <h3 className="text-lg font-bold text-white">{event.name}</h3>
+                      <div className="text-sm text-slate-400 mt-1">
+                        {event.date} • {event.venue || 'TBA'}
+                      </div>
+                      <div className="text-xs text-slate-500 mt-1">
+                        {event.matches?.length || 0} matches
+                        {event.matches?.some(m => m.winner) && 
+                          <span className="ml-2 text-green-400">• Has Results</span>
+                        }
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleEditEvent(event)}
+                      className="p-3 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
+                    >
+                      <Edit className="text-white" size={20} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          
+          <div>
+            <h2 className="text-2xl font-black text-white mb-4">Past Events</h2>
+            <div className="grid gap-4">
+              {pastEvents.slice(0, 10).map(event => (
+                <div
+                  key={event.id}
+                  className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-slate-700 transition-colors"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-lg font-bold text-white">{event.name}</h3>
+                        {event.manuallyEdited && (
+                          <span className="px-2 py-0.5 text-xs font-semibold text-green-400 bg-green-900/30 border border-green-700 rounded">
+                            🛡️ PROTECTED
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-sm text-slate-400 mt-1">
+                        {event.date} • {event.venue || 'TBA'}
+                      </div>
+                      <div className="text-xs text-slate-500 mt-1">
+                        {event.matches?.length || 0} matches
+                        {event.matches?.filter(m => m.winner).length > 0 && (
+                          <span className="ml-2 text-green-400">
+                            • {event.matches.filter(m => m.winner).length}/{event.matches.length} results
+                          </span>
+                        )}
+                        {event.manuallyEdited && event.lastEditedBy && (
+                          <span className="ml-2 text-slate-400">
+                            • Edited by {event.lastEditedBy}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleEditEvent(event)}
+                      className="p-3 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
+                    >
+                      <Edit className="text-white" size={20} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          
+          {/* Create Event Modal */}
+          {showCreateEventModal && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-2xl font-black text-white">Create New Event</h2>
+                  <button
+                    onClick={() => {
+                      setShowCreateEventModal(false);
+                      setNewEvent({ name: '', date: '', venue: '', promotionId: 'wwe', isPPV: true, posterUrl: '', bannerUrl: '' });
+                      setNewMatches([]);
+                    }}
+                    className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
+                  >
+                    <XIcon className="text-white" size={20} />
+                  </button>
+                </div>
+                
+                {/* Event creation form will go here - keeping existing content */}
+                <div className="space-y-4 mb-6">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-300 mb-2">Event Name *</label>
+                    <input
+                      type="text"
+                      value={newEvent.name}
+                      onChange={(e) => setNewEvent({...newEvent, name: e.target.value})}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
+                      placeholder="Royal Rumble 2026"
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-bold text-slate-300 mb-2">Date *</label>
+                      <input
+                        type="text"
+                        value={newEvent.date}
+                        onChange={(e) => setNewEvent({...newEvent, date: e.target.value})}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
+                        placeholder="Jan 25, 2026"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-bold text-slate-300 mb-2">Venue</label>
+                      <input
+                        type="text"
+                        value={newEvent.venue}
+                        onChange={(e) => setNewEvent({...newEvent, venue: e.target.value})}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
+                        placeholder="Lucas Oil Stadium"
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-bold text-slate-300 mb-2">Promotion</label>
+                      <select
+                        value={newEvent.promotionId}
+                        onChange={(e) => setNewEvent({...newEvent, promotionId: e.target.value})}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
+                      >
+                        {promotions.map(promo => (
+                          <option key={promo.id} value={promo.id}>{promo.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-bold text-slate-300 mb-2">Event Type</label>
+                      <select
+                        value={newEvent.isPPV ? 'ppv' : 'weekly'}
+                        onChange={(e) => setNewEvent({...newEvent, isPPV: e.target.value === 'ppv'})}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
+                      >
+                        <option value="ppv">PPV/Premium</option>
+                        <option value="weekly">Weekly Show</option>
+                      </select>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-bold text-slate-300 mb-2">Poster URL</label>
+                    <input
+                      type="url"
+                      value={newEvent.posterUrl}
+                      onChange={(e) => setNewEvent({...newEvent, posterUrl: e.target.value})}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
+                      placeholder="https://example.com/poster.jpg"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-bold text-slate-300 mb-2">Banner URL</label>
+                    <input
+                      type="url"
+                      value={newEvent.bannerUrl}
+                      onChange={(e) => setNewEvent({...newEvent, bannerUrl: e.target.value})}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
+                      placeholder="https://example.com/banner.jpg"
+                    />
+                  </div>
+                </div>
+                
+                <button
+                  onClick={async () => {
+                    if (!newEvent.name || !newEvent.date) {
+                      setSaveMessage('❌ Event name and date are required');
+                      return;
+                    }
+                    
+                    try {
+                      const eventId = `${newEvent.promotionId}-${newEvent.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${new Date().getTime()}`;
+                      const eventRef = doc(db, 'artifacts', appId, 'public', 'data', 'events', eventId);
+                      
+                      await setDoc(eventRef, {
+                        id: eventId,
+                        name: newEvent.name,
+                        date: newEvent.date,
+                        venue: newEvent.venue,
+                        promotionId: newEvent.promotionId,
+                        isPPV: newEvent.isPPV,
+                        posterUrl: newEvent.posterUrl || '',
+                        bannerUrl: newEvent.bannerUrl || '',
+                        matches: [],
+                        manuallyEdited: true,
+                        createdBy: userProfile?.displayName || userProfile?.email || 'Admin',
+                        createdAt: serverTimestamp(),
+                        updatedAt: serverTimestamp()
+                      });
+                      
+                      setSaveMessage('✅ Event created successfully!');
+                      setShowCreateEventModal(false);
+                      setNewEvent({ name: '', date: '', venue: '', promotionId: 'wwe', isPPV: true, posterUrl: '', bannerUrl: '' });
+                    } catch (error) {
+                      setSaveMessage(`❌ Error creating event: ${error.message}`);
+                    }
+                  }}
+                  className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-xl transition-colors flex items-center justify-center gap-2"
+                >
+                  <Save size={20} />
+                  Create Event
+                </button>
+              </div>
+            </div>
+          )}
+          
+          {/* Bulk Winners Modal */}
+          {showBulkWinnersModal && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-2xl font-black text-white">Bulk Assign Winners</h2>
+                  <button
+                    onClick={() => {
+                      setShowBulkWinnersModal(false);
+                      setBulkEventId('');
+                      setBulkWinnersText('');
+                    }}
+                    className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
+                  >
+                    <XIcon className="text-white" size={20} />
+                  </button>
+                </div>
+                
+                <div className="space-y-4 mb-6">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-300 mb-2">Select Event</label>
+                    <select
+                      value={bulkEventId}
+                      onChange={(e) => setBulkEventId(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
+                    >
+                      <option value="">Choose an event...</option>
+                      {events.map(event => (
+                        <option key={event.id} value={event.id}>
+                          {event.name} - {event.date}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-bold text-slate-300 mb-2">
+                      Winners (CSV Format)
+                    </label>
+                    <p className="text-xs text-slate-400 mb-2">
+                      Format: Match Number, Winner Name (one per line)
+                    </p>
+                    <textarea
+                      value={bulkWinnersText}
+                      onChange={(e) => setBulkWinnersText(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white font-mono text-sm h-64"
+                      placeholder="1, Roman Reigns&#10;2, Seth Rollins&#10;3, Cody Rhodes"
+                    />
+                  </div>
+                </div>
+                
+                <button
+                  onClick={async () => {
+                    if (!bulkEventId || !bulkWinnersText) {
+                      setSaveMessage('❌ Please select an event and enter winners');
+                      return;
+                    }
+                    
+                    setBulkProcessing(true);
+                    try {
+                      const event = events.find(e => e.id === bulkEventId);
+                      if (!event) throw new Error('Event not found');
+                      
+                      const lines = bulkWinnersText.split('\n').filter(l => l.trim());
+                      const updatedMatches = [...(event.matches || [])];
+                      
+                      lines.forEach(line => {
+                        const [matchNumStr, winnerName] = line.split(',').map(s => s.trim());
+                        const matchNum = parseInt(matchNumStr);
+                        
+                        if (matchNum > 0 && matchNum <= updatedMatches.length && winnerName) {
+                          updatedMatches[matchNum - 1].winner = winnerName;
+                        }
+                      });
+                      
+                      const eventRef = doc(db, 'artifacts', appId, 'public', 'data', 'events', bulkEventId);
+                      await updateDoc(eventRef, {
+                        matches: updatedMatches,
+                        manuallyEdited: true,
+                        lastEditedBy: userProfile?.displayName || userProfile?.email || 'Admin',
+                        lastEditedAt: serverTimestamp(),
+                        updatedAt: serverTimestamp()
+                      });
+                      
+                      setSaveMessage('✅ Winners assigned successfully!');
+                      setShowBulkWinnersModal(false);
+                      setBulkEventId('');
+                      setBulkWinnersText('');
+                    } catch (error) {
+                      setSaveMessage(`❌ Error: ${error.message}`);
+                    } finally {
+                      setBulkProcessing(false);
+                    }
+                  }}
+                  disabled={bulkProcessing}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  <Upload size={20} />
+                  {bulkProcessing ? 'Processing...' : 'Assign Winners'}
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+        </>
+      )}
+      
+      {/* ==================== ANALYTICS TAB ==================== */}
+      {adminTab === 'analytics' && (
+        <div className="space-y-6">
+          {analyticsLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="animate-spin text-red-600" size={32} />
+            </div>
+          ) : analyticsData ? (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
+                  <div className="text-slate-400 text-sm mb-1">Total Users</div>
+                  <div className="text-3xl font-black text-white">{analyticsData.totalUsers}</div>
+                </div>
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
+                  <div className="text-slate-400 text-sm mb-1">Active Users</div>
+                  <div className="text-3xl font-black text-green-400">{analyticsData.activeUsers}</div>
+                  <div className="text-xs text-slate-500 mt-1">
+                    {((analyticsData.activeUsers / analyticsData.totalUsers) * 100).toFixed(1)}%
+                  </div>
+                </div>
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
+                  <div className="text-slate-400 text-sm mb-1">Total Predictions</div>
+                  <div className="text-3xl font-black text-blue-400">{analyticsData.totalPredictions}</div>
+                </div>
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
+                  <div className="text-slate-400 text-sm mb-1">Avg Per User</div>
+                  <div className="text-3xl font-black text-purple-400">{analyticsData.avgPerUser}</div>
+                </div>
+              </div>
+              
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                <h3 className="text-xl font-black text-white mb-4">Top Events by Predictions</h3>
+                <div className="space-y-2">
+                  {analyticsData.topEvents.map((event, idx) => (
+                    <div key={idx} className="flex items-center justify-between py-3 border-b border-slate-800 last:border-0">
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl font-black text-slate-600">{idx + 1}</span>
+                        <span className="text-white font-bold">{event.name}</span>
+                      </div>
+                      <span className="text-red-500 font-black">{event.predictions}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
+              <button
+                onClick={loadAnalytics}
+                className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl transition-colors"
+              >
+                Refresh Analytics
+              </button>
+            </>
+          ) : (
+            <div className="text-center py-12">
+              <p className="text-slate-400 mb-4">No analytics data loaded</p>
+              <button
+                onClick={loadAnalytics}
+                className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition-colors"
+              >
+                Load Analytics
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+      
+      {/* Users Tab */}
+      {adminTab === 'users' && (
+        <div className="space-y-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-black text-white">User Management</h2>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowCreateUserModal(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg transition-colors"
+                >
+                  <UserPlus size={18} />
+                  Create User
+                </button>
+                <button
+                  onClick={loadUsers}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-lg transition-colors"
+                >
+                  Refresh
+                </button>
+              </div>
+            </div>
+            
+            <input
+              type="text"
+              value={userSearch}
+              onChange={(e) => setUserSearch(e.target.value)}
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white mb-6"
+              placeholder="Search users by name or email..."
+            />
+            
+            {usersLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="animate-spin text-red-600" size={32} />
+              </div>
+            ) : filteredUsers.length === 0 ? (
+              <p className="text-center text-slate-400 py-12">No users found</p>
+            ) : (
+              <div className="space-y-3">
+                {filteredUsers.slice(0, 50).map(user => (
+                  <div key={user.id} className="bg-slate-800 border border-slate-700 rounded-xl p-5 hover:border-slate-600 transition-all">
+                    <div className="flex items-start justify-between gap-4 mb-3">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-bold text-white text-lg">{user.displayName || 'Anonymous'}</span>
+                          {user.isAdmin && (
+                            <span className="px-2 py-0.5 bg-red-900/30 text-red-400 text-xs font-bold rounded border border-red-700">
+                              ADMIN
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-sm text-slate-400">{user.email || 'No email'}</div>
+                        <div className="text-xs text-slate-500 mt-1">
+                          ID: {user.id.substring(0, 16)}...
+                        </div>
+                      </div>
+                      
+                      {/* Points Display/Edit */}
+                      <div className="text-right">
+                        {editingUserId === user.id ? (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              value={editingUserPoints}
+                              onChange={(e) => setEditingUserPoints(e.target.value)}
+                              className="w-20 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-white text-sm"
+                              placeholder="0"
+                            />
+                            <button
+                              onClick={() => handleSaveUserPoints(user.id)}
+                              className="p-1.5 bg-green-600 hover:bg-green-700 rounded transition-colors"
+                              title="Save"
+                            >
+                              <CheckCircle size={16} className="text-white" />
+                            </button>
+                            <button
+                              onClick={() => setEditingUserId(null)}
+                              className="p-1.5 bg-slate-700 hover:bg-slate-600 rounded transition-colors"
+                              title="Cancel"
+                            >
+                              <XCircle size={16} className="text-white" />
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              setEditingUserId(user.id);
+                              setEditingUserPoints(user.score || 0);
+                            }}
+                            className="text-slate-400 hover:text-white transition-colors"
+                            title="Edit Points"
+                          >
+                            <div className="text-xs text-slate-500">Points</div>
+                            <div className="text-2xl font-black text-red-500">{user.score || 0}</div>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Action Buttons */}
+                    <div className="flex gap-2 flex-wrap">
+                      {!user.isAdmin ? (
+                        <button
+                          onClick={() => handleMakeAdmin(user.id)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-bold rounded-lg transition-colors"
+                        >
+                          <Shield size={14} />
+                          Make Admin
+                        </button>
+                      ) : user.id !== userProfile.uid && (
+                        <button
+                          onClick={() => handleRevokeAdmin(user.id)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-lg transition-colors"
+                        >
+                          <XCircle size={14} />
+                          Revoke Admin
+                        </button>
+                      )}
+                      
+                      <button
+                        onClick={() => handleClearPredictions(user.id, user.displayName || user.email)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 text-white text-xs font-bold rounded-lg transition-colors"
+                      >
+                        <FileText size={14} />
+                        Clear Predictions
+                      </button>
+                      
+                      <button
+                        onClick={() => handleDeleteUser(user.id, user.email || user.displayName)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition-colors"
+                      >
+                        <Trash2 size={14} />
+                        Delete User
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {filteredUsers.length > 50 && (
+                  <p className="text-center text-slate-500 text-sm py-4">
+                    Showing first 50 of {filteredUsers.length} users
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+          
+          {/* Create User Modal */}
+          {showCreateUserModal && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-2xl font-black text-white">Create New User</h2>
+                  <button
+                    onClick={() => {
+                      setShowCreateUserModal(false);
+                      setNewUserData({ email: '', password: '', displayName: '', isAdmin: false });
+                    }}
+                    className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
+                  >
+                    <XIcon className="text-white" size={20} />
+                  </button>
+                </div>
+                
+                <div className="space-y-4 mb-6">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-300 mb-2">Email *</label>
+                    <input
+                      type="email"
+                      value={newUserData.email}
+                      onChange={(e) => setNewUserData({...newUserData, email: e.target.value})}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
+                      placeholder="user@example.com"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-bold text-slate-300 mb-2">Display Name</label>
+                    <input
+                      type="text"
+                      value={newUserData.displayName}
+                      onChange={(e) => setNewUserData({...newUserData, displayName: e.target.value})}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
+                      placeholder="John Doe"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-bold text-slate-300 mb-2">Temporary Password *</label>
+                    <input
+                      type="password"
+                      value={newUserData.password}
+                      onChange={(e) => setNewUserData({...newUserData, password: e.target.value})}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
+                      placeholder="Min 6 characters"
+                    />
+                    <p className="text-xs text-slate-500 mt-1">
+                      User will need to sign up with this email/password
+                    </p>
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="newUserAdmin"
+                      checked={newUserData.isAdmin}
+                      onChange={(e) => setNewUserData({...newUserData, isAdmin: e.target.checked})}
+                      className="w-4 h-4 bg-slate-800 border-slate-700 rounded"
+                    />
+                    <label htmlFor="newUserAdmin" className="text-sm text-slate-300">
+                      Grant Admin Privileges
+                    </label>
+                  </div>
+                </div>
+                
+                <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4 mb-6">
+                  <p className="text-xs text-yellow-400">
+                    ⚠️ <strong>Note:</strong> Due to Firebase limitations, this creates a user profile only. 
+                    The user must complete signup themselves using the email and password provided above.
+                  </p>
+                </div>
+                
+                <button
+                  onClick={handleCreateUser}
+                  disabled={creatingUser || !newUserData.email || !newUserData.password}
+                  className="w-full bg-green-600 hover:bg-green-700 disabled:bg-slate-700 disabled:text-slate-500 text-white font-bold py-3 px-6 rounded-xl transition-colors flex items-center justify-center gap-2"
+                >
+                  {creatingUser ? (
+                    <>
+                      <Loader2 className="animate-spin" size={20} />
+                      Creating...
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus size={20} />
+                      Create User Profile
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -2068,7 +3069,7 @@ export default function RingsidePickemFinal() {
             setViewState('dashboard');
           } else {
             setViewState('onboarding');
-            setOnboardingPage(1);
+            setOnboardingPage(1); 
             // Pre-fill tempName if displayName was provided during signup or from Google
             if (displayName.trim()) {
               setTempName(displayName.trim());
@@ -2692,7 +3693,7 @@ export default function RingsidePickemFinal() {
     } catch (error) {
       console.error("Update display name error:", error);
       setAccountError(error.message || "Failed to update display name.");
-    }
+      }
   };
 
   const handleLogout = async () => {
@@ -2714,7 +3715,7 @@ export default function RingsidePickemFinal() {
       setLoginError(nameValidation.errors[0]);
       return;
     }
-    
+
     // Sanitize display name
     const sanitizedName = sanitizeString(tempName.trim());
     
@@ -3163,7 +4164,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
   if (viewState === 'login') {
     return (
       <Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center"><Activity className="animate-spin text-red-600" /></div>}>
-        <LoginView
+      <LoginView
           authMode={authMode}
           setAuthMode={setAuthMode}
           email={email}
@@ -3174,9 +4175,9 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
           setConfirmPassword={setConfirmPassword}
           displayName={displayName}
           setDisplayName={setDisplayName}
-          loginError={loginError}
+        loginError={loginError}
           setLoginError={setLoginError}
-          isLoggingIn={isLoggingIn}
+        isLoggingIn={isLoggingIn}
           handleGuestLogin={handleGuestLogin}
           handleGoogleSignIn={handleGoogleSignIn}
           handleEmailSignIn={handleEmailSignIn}
@@ -3192,15 +4193,15 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
     return (
       <Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center"><Activity className="animate-spin text-red-600" /></div>}>
         <OnboardingFlow
-          onboardingPage={onboardingPage}
+        onboardingPage={onboardingPage}
           setOnboardingPage={setOnboardingPage}
-          tempName={tempName}
+        tempName={tempName}
           setTempName={setTempName}
-          tempSubs={tempSubs}
+        tempSubs={tempSubs}
           handleOnboardingToggle={handleOnboardingToggle}
           completeOnboarding={completeOnboarding}
-          isSubmitting={isSubmitting}
-          loginError={loginError}
+        isSubmitting={isSubmitting}
+        loginError={loginError}
           PROMOTIONS={PROMOTIONS}
           BrandLogo={BrandLogo}
         />
@@ -3294,10 +4295,10 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
             ) : (
               myEvents.map(event => {
                 const promo = PROMOTIONS.find(p => p.id === event.promoId);
-                // Check if event is complete: either has results in eventResults, or has matches with winners (from scraper)
+                // Check if event is complete: user has been graded (eventResults exists)
                 const hasEventResults = eventResults[event.id];
                 const hasMatchWinners = event.matches?.some(m => m.winner);
-                const isGraded = hasEventResults || hasMatchWinners;
+                const isGraded = hasEventResults; // Only graded if user's results have been calculated
                 // Check if event has matches
                 const hasMatches = event.matches && Array.isArray(event.matches) && event.matches.length > 0;
                 return (
@@ -3312,10 +4313,10 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                         <div className="flex-1">
                           <div className="mb-3 flex items-center gap-2 flex-wrap">
                              <div className="w-10 h-10 p-1 bg-slate-950/80 rounded-lg backdrop-blur-sm border border-slate-800"><BrandLogo id={promo.id} /></div>
-                             {isGraded && <div className="bg-green-500/20 text-green-400 px-2 py-1 rounded text-[10px] font-black uppercase flex items-center gap-1"><CheckCircle size={10} /> Complete</div>}
-                             {!hasMatches && !isGraded && <div className="bg-yellow-500/20 text-yellow-400 px-2 py-1 rounded text-[10px] font-black uppercase flex items-center gap-1"><Clock size={10} /> Coming Soon</div>}
-                          </div>
-                          <h4 className="font-black text-2xl text-white leading-none mb-1 italic uppercase shadow-black drop-shadow-md">{event.name}</h4>
+                             {isGraded && <div className="bg-green-500/20 text-green-400 px-2 py-1 rounded text-[10px] font-black uppercase flex items-center gap-1"><CheckCircle size={10} /> Graded</div>}
+                             {!hasMatches && <div className="bg-yellow-500/20 text-yellow-400 px-2 py-1 rounded text-[10px] font-black uppercase flex items-center gap-1"><Clock size={10} /> Coming Soon</div>}
+                             {hasMatches && hasMatchWinners && !isGraded && <div className="bg-blue-500/20 text-blue-400 px-2 py-1 rounded text-[10px] font-black uppercase flex items-center gap-1"><CheckCircle size={10} /> Results Available</div>}
+                          </div>                          <h4 className="font-black text-2xl text-white leading-none mb-1 italic uppercase shadow-black drop-shadow-md">{event.name}</h4>
                           <div className="flex items-center gap-2 text-xs text-slate-300 font-medium"><span className="flex items-center gap-1"><Calendar size={10} /> {event.date}</span>{event.venue && event.venue !== 'TBD' && <><span className="w-1 h-1 rounded-full bg-slate-500"></span><span className="flex items-center gap-1"><MapPin size={10} /> {event.venue}</span></>}{(!event.venue || event.venue === 'TBD') && <><span className="w-1 h-1 rounded-full bg-slate-500"></span><span className="flex items-center gap-1 text-slate-500"><MapPin size={10} /> TBA</span></>}</div>
                         </div>
                         <div className="bg-white/10 p-2 rounded-full backdrop-blur-sm group-hover:bg-red-600 transition-colors"><ChevronRight className="text-white" size={20} /></div>
@@ -3347,7 +4348,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
               <div className="absolute inset-0 bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950 -z-10"></div>
               <div className="absolute inset-0 bg-gradient-to-t from-slate-950 to-transparent"></div>
               <div className="absolute bottom-0 left-0 p-6 w-full text-center"><div className="inline-block w-16 h-16 p-2 bg-slate-950/50 backdrop-blur-md rounded-xl border border-slate-700 mb-2 shadow-lg"><BrandLogo id={selectedEvent.promoId} /></div><h1 className="text-3xl font-black italic uppercase text-white shadow-black drop-shadow-lg">{selectedEvent.name}</h1></div>
-            </div>
+               </div>
             <div className="space-y-6">
               {(() => {
                 // Debug logging
@@ -3370,18 +4371,18 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                       {process.env.NODE_ENV === 'development' && (
                         <p className="text-xs text-slate-600 mt-2">Debug: matches is null/undefined</p>
                       )}
-                    </div>
+            </div>
                   );
                 }
                 
                 if (!Array.isArray(selectedEvent.matches)) {
-                  return (
+                    return (
                     <div className="text-center py-12 bg-slate-900/50 rounded-xl border border-dashed border-slate-800">
                       <p className="text-slate-500 text-sm">No matches available for this event yet.</p>
                       {process.env.NODE_ENV === 'development' && (
                         <p className="text-xs text-slate-600 mt-2">Debug: matches is not an array (type: {typeof selectedEvent.matches})</p>
                       )}
-                    </div>
+                            </div>
                   );
                 }
                 
@@ -3392,8 +4393,8 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                       {process.env.NODE_ENV === 'development' && (
                         <p className="text-xs text-slate-600 mt-2">Debug: matches array is empty</p>
                       )}
-                    </div>
-                  );
+                      </div>
+                    );
                 }
                 
                 // Render matches
@@ -3502,14 +4503,14 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                                 <div className="flex items-center gap-1.5">
                                   <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
                                   <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Community Picks</span>
-                                </div>
+               </div>
                                 {sentiment.simulated && (
                                   <span className="text-[8px] text-slate-600 bg-slate-800 px-1.5 py-0.5 rounded">PROJECTED</span>
                                 )}
                               </div>
                               <span className="text-[10px] text-slate-500 font-medium">{sentiment.total.toLocaleString()} votes</span>
-                            </div>
-                            
+            </div>
+            
                             {/* Tug of War Bar */}
                             <div className="relative">
                               {/* Background track */}
@@ -3636,20 +4637,20 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                               className="mt-3 w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-4 rounded-xl text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               Submit Prediction
-                            </button>
+                  </button>
                             
                             {myPick && (
                               <div className="mt-3 p-3 bg-slate-950/50 rounded-xl border border-red-900/30 text-center">
                                 <span className="text-[8px] text-slate-500 uppercase font-bold block mb-1">Your Pick</span>
                                 <div className="text-white font-black text-lg uppercase">{myPick}</div>
-                              </div>
-                            )}
+               </div>
+            )}
                             
                             {actualWinner && (
                               <div className="mt-3 p-3 bg-green-900/20 rounded-xl border border-green-900/50 text-center">
                                 <span className="text-green-400 font-black uppercase">Winner: {actualWinner}</span>
-                              </div>
-                            )}
+          </div>
+        )}
                           </div>
                         );
                       }
@@ -3673,7 +4674,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                                 <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent pt-8 pb-2 px-1 text-center">
                                   <span className={`block font-black text-xs uppercase leading-tight ${myPick === p.name ? 'text-red-500' : 'text-white'}`}>{p.name}</span>
                                   {myPick === p.name && <span className="text-[7px] font-bold bg-red-600 text-white px-1.5 py-0.5 rounded-full inline-block mt-1">PICK</span>}
-                                </div>
+            </div>
                                 {isWinner(p.name) && <div className="absolute top-1 left-1 bg-green-500 text-black text-[8px] font-black px-1.5 py-0.5 rounded uppercase shadow-lg z-20">Winner</div>}
                               </div>
                             ))}
@@ -3689,7 +4690,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                           { name: match.p3 || 'TBD', image: match.p3Image },
                           { name: match.p4 || 'TBD', image: match.p4Image }
                         ];
-                        return (
+                return (
                           <div className="grid grid-cols-2 gap-1 h-64">
                             {participants.map((p, idx) => (
                               <div 
@@ -3780,7 +4781,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                       
                       // Default 1v1 or small tag team match
                       return (
-                        <div className="flex gap-1 h-64"> 
+                    <div className="flex gap-1 h-64"> 
                           <div onClick={() => !actualWinner && !lockedEvents[selectedEvent.id] && makePrediction(selectedEvent.id, match.id, match.p1, selectedMethod[matchKey] || 'pinfall')} className={`flex-1 relative rounded-l-2xl overflow-hidden transition-all duration-300 border-y border-l ${lockedEvents[selectedEvent.id] ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-600'} ${myPick === match.p1 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800'} ${actualWinner && !isWinner(match.p1) ? 'grayscale opacity-50' : ''}`}>
                              {match.p1Members && match.p1Members.length === 2 ? (
                                <div className="w-full h-full grid grid-cols-2 gap-0.5">
@@ -3797,15 +4798,15 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                                {sentiment && sentiment.p1 >= 55 && <div className="text-[8px] text-cyan-400 font-bold mt-1 bg-cyan-950/50 px-2 py-0.5 rounded-full inline-block">🔥 {sentiment.p1}% pick</div>}
                              </div>
                              {isWinner(match.p1) && <div className="absolute top-2 left-2 bg-green-500 text-black text-[10px] font-black px-2 py-1 rounded uppercase shadow-lg z-20">Winner</div>}
-                          </div>
-                          <div className="w-1 bg-slate-900 flex items-center justify-center relative z-20"><div className="absolute bg-slate-950 border border-slate-700 rounded-full w-8 h-8 flex items-center justify-center text-[10px] font-black text-slate-500 italic shadow-xl">VS</div></div>
+                      </div>
+                      <div className="w-1 bg-slate-900 flex items-center justify-center relative z-20"><div className="absolute bg-slate-950 border border-slate-700 rounded-full w-8 h-8 flex items-center justify-center text-[10px] font-black text-slate-500 italic shadow-xl">VS</div></div>
                           <div onClick={() => !actualWinner && !lockedEvents[selectedEvent.id] && makePrediction(selectedEvent.id, match.id, match.p2, selectedMethod[matchKey] || 'pinfall')} className={`flex-1 relative rounded-r-2xl overflow-hidden transition-all duration-300 border-y border-r ${lockedEvents[selectedEvent.id] ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-600'} ${myPick === match.p2 ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] z-10' : 'border-slate-800'} ${actualWinner && !isWinner(match.p2) ? 'grayscale opacity-50' : ''}`}>
                              {match.p2Members && match.p2Members.length === 2 ? (
                                <div className="w-full h-full grid grid-cols-2 gap-0.5">
                                  {match.p2Members.map((member, idx) => (
                                    <WrestlerImage key={idx} name={member.name} className="w-full h-full" imageUrl={member.image} />
                                  ))}
-                               </div>
+                      </div>
                              ) : (
                                <WrestlerImage name={match.p2} className="w-full h-full" imageUrl={match.p2Image} />
                              )}
@@ -3813,11 +4814,11 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                                <span className={`block font-black ${match.p2.length > 25 ? 'text-xs' : match.p2.length > 15 ? 'text-sm' : 'text-lg'} uppercase leading-tight ${myPick === match.p2 ? 'text-red-500' : 'text-white'}`}>{match.p2}</span>
                                {myPick === match.p2 && <span className="text-[8px] font-bold bg-red-600 text-white px-2 py-0.5 rounded-full inline-block mt-1">YOUR PICK</span>}
                                {sentiment && sentiment.p2 >= 55 && <div className="text-[8px] text-amber-400 font-bold mt-1 bg-amber-950/50 px-2 py-0.5 rounded-full inline-block">🔥 {sentiment.p2}% pick</div>}
-                             </div>
+                    </div>
                              {isWinner(match.p2) && <div className="absolute top-2 right-2 bg-green-500 text-black text-[10px] font-black px-2 py-1 rounded uppercase shadow-lg z-20">Winner</div>}
                           </div>
-                        </div>
-                      );
+                  </div>
+                );
                     })()}
                     
                     {/* Method of Victory Selector */}
@@ -3846,7 +4847,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                         {myMethod && (
                           <div className="mt-1 text-[9px] text-slate-400">
                             Your pick: <span className="font-bold text-slate-300 capitalize">{myMethod}</span>
-                          </div>
+            </div>
                         )}
                       </div>
                     )}
@@ -3931,7 +4932,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
         {activeTab === 'settings' && (
           <Suspense fallback={<LoadingSpinner className="p-8" />}>
             <SettingsPanel
-              user={user}
+            user={user}
               userProfile={userProfile}
               displayName={displayName}
               setDisplayName={setDisplayName}
@@ -3955,13 +4956,26 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
             />
           </Suspense>
         )}
+
+        {activeTab === 'admin' && userProfile?.isAdmin && (
+          <AdminPanel
+            events={scrapedEvents}
+            promotions={PROMOTIONS}
+            db={db}
+            appId={appId}
+            userProfile={userProfile}
+          />
+        )}
       </div>
 
       <div className="fixed bottom-0 left-0 w-full bg-slate-900/90 backdrop-blur-md border-t border-slate-800 pb-safe md:pb-0 z-50">
-        <div className="flex justify-around items-center h-16 max-w-md mx-auto">
+        <div className={`flex justify-around items-center h-16 max-w-md mx-auto ${userProfile?.isAdmin ? 'max-w-2xl' : ''}`}>
           <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center gap-1 w-16 ${activeTab === 'home' ? 'text-red-500' : 'text-slate-500'}`}><Calendar size={20} strokeWidth={2.5} /><span className="text-[8px] uppercase font-bold mt-1">Events</span></button>
           <button onClick={() => setActiveTab('leaderboard')} className={`flex flex-col items-center gap-1 w-16 ${activeTab === 'leaderboard' ? 'text-red-500' : 'text-slate-500'}`}><BarChart3 size={20} strokeWidth={2.5} /><span className="text-[8px] uppercase font-bold mt-1">Rankings</span></button>
           <button onClick={() => setActiveTab('settings')} className={`flex flex-col items-center gap-1 w-16 ${activeTab === 'settings' ? 'text-red-500' : 'text-slate-500'}`}><Settings size={20} strokeWidth={2.5} /><span className="text-[8px] uppercase font-bold mt-1">Config</span></button>
+          {userProfile?.isAdmin && (
+            <button onClick={() => setActiveTab('admin')} className={`flex flex-col items-center gap-1 w-16 ${activeTab === 'admin' ? 'text-red-500' : 'text-slate-500'}`}><Shield size={20} strokeWidth={2.5} /><span className="text-[8px] uppercase font-bold mt-1">Admin</span></button>
+          )}
         </div>
       </div>
        <style>{`

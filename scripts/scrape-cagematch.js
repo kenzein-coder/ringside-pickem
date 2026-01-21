@@ -21,6 +21,7 @@ const DELAY_MS = 2000;
 
 // Firebase initialization (optional - only if service account exists)
 let db = null;
+let storage = null;
 let appId = 'default-app-id';
 
 function initFirebase() {
@@ -32,12 +33,14 @@ function initFirebase() {
       
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
-        projectId: serviceAccount.project_id
+        projectId: serviceAccount.project_id,
+        storageBucket: `${serviceAccount.project_id}.firebasestorage.app`
       });
       
       db = admin.firestore();
+      storage = admin.storage().bucket();
       appId = serviceAccount.project_id;
-      console.log('✅ Firebase Admin SDK initialized\n');
+      console.log('✅ Firebase Admin SDK initialized (Firestore + Storage)\n');
       return true;
     } else {
       console.log('⚠️  Service account key not found at:', serviceAccountPath);
@@ -144,7 +147,11 @@ function parseHTML(html) {
     const eventMatch = row.match(/<a[^>]*href="\?id=1&amp;nr=(\d+)"[^>]*>([^<]+)<\/a>/);
     if (eventMatch && promoId) {
       const eventId = eventMatch[1];
-      const eventName = eventMatch[2].trim();
+      let eventName = eventMatch[2].trim();
+      
+      // Remove promotion prefix from event name (e.g., "WWE Royal Rumble" -> "Royal Rumble")
+      eventName = cleanEventName(eventName, promoName);
+      
       const key = eventId;
       
       if (!seenEvents.has(key) && eventName.length > 0) {
@@ -266,6 +273,47 @@ async function scrapeRecentEvents() {
     console.error(`❌ Error scraping events:`, error.message);
     return [];
   }
+}
+
+// Helper to remove promotion prefix from event name
+function cleanEventName(eventName, promotionName) {
+  // Remove common promotion prefixes
+  const promotionPrefixes = [
+    'WWE',
+    'AEW',
+    'NJPW',
+    'TNA',
+    'ROH',
+    'Ring of Honor',
+    'Impact Wrestling',
+    'Impact',
+    'STARDOM',
+    'All Elite Wrestling',
+    'New Japan Pro Wrestling',
+    'World Wrestling Entertainment',
+    'MLW',
+    'Major League Wrestling',
+    'GCW',
+    'Game Changer Wrestling',
+    'PWG',
+    'Pro Wrestling Guerrilla',
+  ];
+  
+  let cleanedName = eventName;
+  
+  // Try exact promotion name first
+  if (promotionName) {
+    const regex = new RegExp(`^${promotionName}\\s+`, 'i');
+    cleanedName = cleanedName.replace(regex, '');
+  }
+  
+  // Then try common prefixes
+  for (const prefix of promotionPrefixes) {
+    const regex = new RegExp(`^${prefix}\\s+`, 'i');
+    cleanedName = cleanedName.replace(regex, '');
+  }
+  
+  return cleanedName.trim();
 }
 
 // Helper to check if event name looks like a PPV (not a weekly show)
@@ -770,6 +818,7 @@ function parseEventDetails(html) {
               : beforePattern[0].name;
             p1Image = beforePattern[0].imageUrl;
             winner = p1;
+            console.log(`      ✅ Winner found: ${winner}`);
           }
           
           if (afterPattern.length > 0) {
@@ -780,6 +829,12 @@ function parseEventDetails(html) {
             p2Image = afterPattern[0].imageUrl;
             loser = p2;
           }
+        } else if (!resultsMatch) {
+          console.log(`      ⚠️  No MatchResults div found - match may be announced but not completed`);
+        } else if (!winnerPattern) {
+          // Debug: Show what the results HTML looks like
+          const resultsPreview = resultsHtml.substring(0, 150).replace(/\s+/g, ' ').replace(/<[^>]*>/g, '');
+          console.log(`      ⚠️  No winner pattern found in results. Preview: "${resultsPreview}"`);
         } else if (mainWrestlers.length >= 2) {
           // No "defeats" - split wrestlers into two teams
           // For tag matches, try to split evenly
@@ -839,6 +894,62 @@ function parseEventDetails(html) {
   return details;
 }
 
+// Helper function to download an image and upload to Firebase Storage
+async function downloadAndUploadToStorage(imageUrl, type, identifier) {
+  if (!storage || !imageUrl) return null;
+  
+  try {
+    // Create safe filename
+    const safeName = identifier.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+    const fileExtension = imageUrl.split('.').pop().split('?')[0].replace(/[^a-z]/gi, '') || 'jpg';
+    const storagePath = `images/${type}/${safeName}.${fileExtension}`;
+    
+    // Check if already exists
+    const file = storage.file(storagePath);
+    const [exists] = await file.exists();
+    if (exists) {
+      // Get public URL
+      const [metadata] = await file.getMetadata();
+      if (metadata.mediaLink) {
+        // Generate a public URL
+        const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${storage.name}/o/${encodeURIComponent(storagePath)}?alt=media`;
+        return publicUrl;
+      }
+    }
+    
+    // Download the image using https
+    const imageData = await new Promise((resolve, reject) => {
+      const chunks = [];
+      https.get(imageUrl, (res) => {
+        if (res.statusCode !== 200) {
+          return reject(new Error(`HTTP ${res.statusCode}`));
+        }
+        res.on('data', chunk => chunks.push(chunk));
+        res.on('end', () => resolve(Buffer.concat(chunks)));
+      }).on('error', reject);
+    });
+    
+    // Upload to Storage
+    await file.save(imageData, {
+      metadata: {
+        contentType: `image/${fileExtension}`,
+        metadata: {
+          originalUrl: imageUrl,
+          uploadedAt: new Date().toISOString()
+        }
+      },
+      public: true
+    });
+    
+    // Get public URL
+    const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${storage.name}/o/${encodeURIComponent(storagePath)}?alt=media`;
+    return publicUrl;
+  } catch (error) {
+    console.log(`   ⚠️  Failed to upload image for ${identifier}: ${error.message}`);
+    return null;
+  }
+}
+
 // Helper function to save image URL to Firestore
 async function saveImageToFirestore(type, identifier, imageUrl) {
   if (!db || !appId || !imageUrl) return;
@@ -865,11 +976,82 @@ async function saveImageToFirestore(type, identifier, imageUrl) {
   }
 }
 
+// Function to fetch wrestler image from Wikipedia/Wikimedia
+async function fetchWikipediaImage(wrestlerName) {
+  try {
+    // Search Wikipedia for the wrestler
+    const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=pageimages&titles=${encodeURIComponent(wrestlerName + ' (wrestler)')}&pithumbsize=500`;
+    
+    const searchData = await new Promise((resolve, reject) => {
+      https.get(searchUrl, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch (e) {
+            reject(e);
+          }
+        });
+      }).on('error', reject);
+    });
+    
+    // Extract image URL from response
+    if (searchData.query && searchData.query.pages) {
+      const pages = Object.values(searchData.query.pages);
+      if (pages.length > 0 && pages[0].thumbnail) {
+        const imageUrl = pages[0].thumbnail.source;
+        return imageUrl;
+      }
+    }
+    
+    // Try without "(wrestler)" suffix
+    const searchUrl2 = `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=pageimages&titles=${encodeURIComponent(wrestlerName)}&pithumbsize=500`;
+    
+    const searchData2 = await new Promise((resolve, reject) => {
+      https.get(searchUrl2, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch (e) {
+            reject(e);
+          }
+        });
+      }).on('error', reject);
+    });
+    
+    if (searchData2.query && searchData2.query.pages) {
+      const pages = Object.values(searchData2.query.pages);
+      if (pages.length > 0 && pages[0].thumbnail) {
+        const imageUrl = pages[0].thumbnail.source;
+        return imageUrl;
+      }
+    }
+  } catch (error) {
+    console.log(`   ⚠️  Wikipedia API failed for ${wrestlerName}: ${error.message}`);
+  }
+  
+  return null;
+}
+
 // Function to scrape wrestler image from wrestler profile page
 async function scrapeWrestlerImage(wrestlerId, wrestlerName) {
   if (!wrestlerId || !db) return null;
   
   try {
+    // First, try Wikipedia/Wikimedia (more reliable)
+    const wikipediaImage = await fetchWikipediaImage(wrestlerName);
+    if (wikipediaImage && storage) {
+      const storageUrl = await downloadAndUploadToStorage(wikipediaImage, 'wrestlers', wrestlerName);
+      if (storageUrl) {
+        await saveImageToFirestore('wrestlers', wrestlerName, storageUrl);
+        return storageUrl;
+      }
+    }
+    
+    // Fallback to Cagematch if Wikipedia fails
     const url = `https://www.cagematch.net/?id=2&nr=${wrestlerId}`;
     const html = await fetchHTML(url);
     await delay(DELAY_MS);
@@ -888,7 +1070,17 @@ async function scrapeWrestlerImage(wrestlerId, wrestlerName) {
     
     if (imageMatch) {
       const imageUrl = imageMatch[1].startsWith('http') ? imageMatch[1] : 'https://www.cagematch.net' + imageMatch[1];
-      // Save to Firestore
+      
+      // Upload to Storage first if available
+      if (storage) {
+        const storageUrl = await downloadAndUploadToStorage(imageUrl, 'wrestlers', wrestlerName);
+        if (storageUrl) {
+          await saveImageToFirestore('wrestlers', wrestlerName, storageUrl);
+          return storageUrl;
+        }
+      }
+      
+      // Fallback to saving Cagematch URL if Storage upload fails
       await saveImageToFirestore('wrestlers', wrestlerName, imageUrl);
       return imageUrl;
     }
@@ -1068,16 +1260,24 @@ async function main() {
           if (eventDetails.posterUrl) docData.posterUrl = eventDetails.posterUrl;
           if (eventDetails.slug) docData.slug = eventDetails.slug;
           
-          await db
+          // Check if event has been manually edited by admin before overwriting
+          const eventRef = db
             .collection('artifacts')
             .doc(appId)
             .collection('public')
             .doc('data')
             .collection('events')
-            .doc(eventDetails.id)
-            .set(docData, { merge: true });
+            .doc(eventDetails.id);
           
-          console.log(`  ✅ Saved ${eventDetails.name} to Firestore`);
+          const existingEvent = await eventRef.get();
+          const isManuallyEdited = existingEvent.exists && existingEvent.data().manuallyEdited === true;
+          
+          if (isManuallyEdited) {
+            console.log(`  ⚠️  Skipping ${eventDetails.name} - manually edited by admin`);
+          } else {
+            await eventRef.set(docData, { merge: true });
+            console.log(`  ✅ Saved ${eventDetails.name} to Firestore`);
+          }
         } catch (error) {
           console.error(`  ⚠️  Error saving ${eventDetails.name}:`, error.message);
         }
@@ -1137,26 +1337,54 @@ async function main() {
     
     console.log(`📊 Found ${allWrestlers.size} unique wrestlers across all events\n`);
     
-    // Save wrestler images to Firestore (limit to first 50 to avoid too many requests)
-    if (db && allWrestlers.size > 0) {
-      console.log('💾 Saving wrestler images to Firestore...\n');
-      let savedCount = 0;
+    // Upload wrestler images to Storage and save to Firestore (limit to first 50 to avoid too many requests)
+    if (db && storage && allWrestlers.size > 0) {
+      console.log('📸 Fetching wrestler images from Wikipedia/Wikimedia...\n');
+      let uploadedCount = 0;
+      let skippedCount = 0;
       const wrestlersArray = Array.from(allWrestlers.values()).slice(0, 50);
       
       for (const wrestler of wrestlersArray) {
         try {
-          // Save the image URL we already have from matches
-          if (wrestler.imageUrl) {
-            await saveImageToFirestore('wrestlers', wrestler.name, wrestler.imageUrl);
-            savedCount++;
+          console.log(`   Processing: ${wrestler.name}...`);
+          
+          // Strategy 1: Try Wikipedia/Wikimedia first (most reliable)
+          const wikipediaImage = await fetchWikipediaImage(wrestler.name);
+          if (wikipediaImage) {
+            const storageUrl = await downloadAndUploadToStorage(wikipediaImage, 'wrestlers', wrestler.name);
+            if (storageUrl) {
+              await saveImageToFirestore('wrestlers', wrestler.name, storageUrl);
+              uploadedCount++;
+              console.log(`   ✅ Uploaded from Wikipedia: ${wrestler.name}`);
+              await delay(500);
+              continue;
+            }
           }
-          // Optionally scrape better image from wrestler profile (commented out to avoid too many requests)
-          // await scrapeWrestlerImage(wrestler.id, wrestler.name);
+          
+          // Strategy 2: Try Cagematch URL if provided
+          if (wrestler.imageUrl) {
+            const storageUrl = await downloadAndUploadToStorage(wrestler.imageUrl, 'wrestlers', wrestler.name);
+            if (storageUrl) {
+              await saveImageToFirestore('wrestlers', wrestler.name, storageUrl);
+              uploadedCount++;
+              console.log(`   ✅ Uploaded from Cagematch: ${wrestler.name}`);
+              await delay(500);
+              continue;
+            }
+          }
+          
+          // No image found
+          skippedCount++;
+          console.log(`   ⚠️  No image found: ${wrestler.name}`);
+          await delay(500);
         } catch (error) {
-          console.log(`   ⚠️  Error saving image for ${wrestler.name}:`, error.message);
+          console.log(`   ⚠️  Error processing image for ${wrestler.name}:`, error.message);
+          skippedCount++;
         }
       }
-      console.log(`✅ Saved ${savedCount} wrestler images to Firestore\n`);
+      console.log(`\n✅ Image upload complete: ${uploadedCount} uploaded, ${skippedCount} skipped\n`);
+    } else if (db && !storage) {
+      console.log('⚠️  Firebase Storage not initialized. Skipping image uploads.\n');
     }
     
     console.log('\n✅ Scraping complete!');
