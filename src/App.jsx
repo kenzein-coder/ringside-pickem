@@ -1560,25 +1560,21 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
       // Step 2: Check provided imageUrl (but only if hardcoded image wasn't found)
       // If hardcoded image exists, we already returned above, so we can try imageUrl as backup
       if (imageUrl) {
-        // Skip Cagematch, Wikimedia, and Wikipedia URLs
-        if (imageUrl.includes('cagematch.net') || 
-            imageUrl.includes('wikimedia.org') || 
-            imageUrl.includes('wikipedia.org')) {
+        // Skip Wikimedia and Wikipedia URLs (but allow Cagematch via proxy)
+        if (imageUrl.includes('wikimedia.org') || imageUrl.includes('wikipedia.org')) {
           // Don't use these sources - continue to other sources
         } else {
-          // Use proxy for external URLs to avoid CORS (but not for Wikimedia)
+          // Use proxy for external URLs to avoid CORS
           let urlToUse = imageUrl;
           let sourceType = 'initial';
           if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-            // Only proxy if it's not already a Wikimedia URL
-            if (!imageUrl.includes('wikimedia.org') && !imageUrl.includes('wikipedia.org')) {
-              urlToUse = getProxiedImageUrl(imageUrl, 400, 500, 'wsrv');
-              sourceType = 'proxy';
-            }
+            // Proxy ALL external URLs including Cagematch
+            urlToUse = getProxiedImageUrl(imageUrl, 400, 500, 'wsrv');
+            sourceType = 'proxy';
           }
           setCurrentImageUrl(urlToUse);
           setImageSource(sourceType);
-          // Save to Firestore for future use (only if not Wikimedia)
+          // Save to Firestore for future use (but not Wikimedia/Wikipedia)
           if (!imageUrl.includes('wikimedia.org') && !imageUrl.includes('wikipedia.org')) {
             saveImageToFirestore('wrestlers', name, imageUrl);
           }
@@ -1590,21 +1586,16 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
       try {
         const firestoreUrl = await getImageFromFirestore('wrestlers', name);
         if (firestoreUrl) {
-          // Skip Cagematch, Wikimedia, and Wikipedia URLs
-          if (firestoreUrl.includes('cagematch.net') || 
-              firestoreUrl.includes('wikimedia.org') || 
-              firestoreUrl.includes('wikipedia.org')) {
+          // Skip Wikimedia and Wikipedia URLs (but allow Cagematch via proxy)
+          if (firestoreUrl.includes('wikimedia.org') || firestoreUrl.includes('wikipedia.org')) {
             // Don't use these sources - continue to other sources
           } else {
-            // Use proxy for external URLs (but not for Wikimedia)
+            // Use proxy for all external URLs including Cagematch
             let urlToUse = firestoreUrl;
             let sourceType = 'database';
             if (firestoreUrl.startsWith('http://') || firestoreUrl.startsWith('https://')) {
-              // Only proxy if it's not already a Wikimedia URL
-              if (!firestoreUrl.includes('wikimedia.org') && !firestoreUrl.includes('wikipedia.org')) {
-                urlToUse = getProxiedImageUrl(firestoreUrl, 400, 500, 'wsrv');
-                sourceType = 'proxy';
-              }
+              urlToUse = getProxiedImageUrl(firestoreUrl, 400, 500, 'wsrv');
+              sourceType = 'proxy';
             }
             setCurrentImageUrl(urlToUse);
             setImageSource(sourceType);
@@ -1767,11 +1758,10 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
         ? (imageUrl || decodeURIComponent(currentImageUrl.match(/url=([^&]+)/)?.[1] || ''))
         : currentImageUrl;
       
-      // Skip if original URL is Wikimedia/Wikipedia/Cagematch
+      // Skip if original URL is Wikimedia/Wikipedia (but allow Cagematch via proxy)
       if (originalUrl && 
           !originalUrl.includes('wikimedia.org') && 
-          !originalUrl.includes('wikipedia.org') &&
-          !originalUrl.includes('cagematch.net')) {
+          !originalUrl.includes('wikipedia.org')) {
         const proxyType = currentImageUrl.includes('wsrv.nl') ? 'images' : 'wsrv';
         const proxied = getProxiedImageUrl(originalUrl, 400, 500, proxyType);
         if (proxied && proxied !== currentImageUrl) {
@@ -1827,8 +1817,12 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
     // Strategy 4: Try Firestore again (might have been updated)
     if (imageSource !== 'database') {
       getImageFromFirestore('wrestlers', name).then((firestoreUrl) => {
-        if (firestoreUrl && !firestoreUrl.includes('cagematch.net') && firestoreUrl !== currentImageUrl) {
-          setCurrentImageUrl(firestoreUrl);
+        if (firestoreUrl && firestoreUrl !== currentImageUrl) {
+          // Proxy Cagematch URLs
+          const urlToUse = firestoreUrl.includes('cagematch.net') 
+            ? getProxiedImageUrl(firestoreUrl, 400, 500, 'wsrv')
+            : firestoreUrl;
+          setCurrentImageUrl(urlToUse);
           setImageSource('database');
           retryCountRef.current = 0;
           return;
