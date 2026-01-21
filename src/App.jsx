@@ -2316,10 +2316,11 @@ export default function RingsidePickemFinal() {
     );
 
     // Listen to events from Firestore (scraped data)
+    // Increased limit to capture all events (no longer limited to 50)
     const eventsQuery = query(
       collection(db, 'artifacts', appId, 'public', 'data', 'events'),
       orderBy('date', 'desc'),
-      limit(50)
+      limit(150)
     );
     const unsubEvents = onSnapshot(eventsQuery, async (snap) => {
       const events = [];
