@@ -2967,6 +2967,7 @@ export default function RingsidePickemFinal() {
   const [isConnected, setIsConnected] = useState(false);
   const [userId, setUserId] = useState(null);
   const [scrapedEvents, setScrapedEvents] = useState([]); // Events from Firestore scraper
+  const [promotionsCache, setPromotionsCache] = useState({}); // Cache for promotion logos
   const [communitySentiment, setCommunitySentiment] = useState({}); // { eventId: { matchId: { p1: 65, p2: 35 } } }
   const [selectedMethod, setSelectedMethod] = useState({}); // { eventId-matchId: 'pinfall' }
   const [predictionsUserId, setPredictionsUserId] = useState(null); // Track which user's predictions we're showing
@@ -3091,6 +3092,29 @@ export default function RingsidePickemFinal() {
     });
     return () => unsubscribe();
   }, []);
+
+  // --- PROMOTIONS CACHE ---  
+  // Fetch all promotions once at startup to avoid repeated queries
+  useEffect(() => {
+    if (!db || !appId) return;
+    
+    const fetchPromotions = async () => {
+      try {
+        const promotionsRef = collection(db, 'artifacts', appId, 'public', 'data', 'promotions');
+        const promotionsSnap = await getDocs(promotionsRef);
+        const cache = {};
+        promotionsSnap.forEach(doc => {
+          cache[doc.id] = doc.data();
+        });
+        setPromotionsCache(cache);
+        console.log(`✅ Loaded ${Object.keys(cache).length} promotions into cache`);
+      } catch (error) {
+        console.error('Error fetching promotions:', error);
+      }
+    };
+    
+    fetchPromotions();
+  }, [db, appId]);
 
   // --- DATA LISTENER ---
   useEffect(() => {
@@ -3318,22 +3342,15 @@ export default function RingsidePickemFinal() {
       orderBy('date', 'desc'),
       limit(150)
     );
-    const unsubEvents = onSnapshot(eventsQuery, async (snap) => {
+    const unsubEvents = onSnapshot(eventsQuery, (snap) => {
       const events = [];
-      for (const d of snap.docs) {
+      snap.forEach(d => {
         const data = d.data();
-        // Fetch promotion logo if promotionId is available
-        let promotionLogoUrl = null;
-        if (data.promotionId) {
-          try {
-            const promoDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'promotions', data.promotionId));
-            if (promoDoc.exists()) {
-              promotionLogoUrl = promoDoc.data().logoUrl;
-            }
-          } catch (e) {
-            // Silently fail if promotion not found
-          }
-        }
+        
+        // Get promotion logo from cache (FAST - no network call!)
+        const promotionLogoUrl = data.promotionId && promotionsCache[data.promotionId] 
+          ? promotionsCache[data.promotionId].logoUrl 
+          : null;
         
         // Map Firestore data structure to app's expected structure
         events.push({
@@ -3354,7 +3371,7 @@ export default function RingsidePickemFinal() {
           promotionId: data.promotionId,
           promotionName: data.promotionName
         });
-      }
+      });
       setScrapedEvents(events);
     });
 
