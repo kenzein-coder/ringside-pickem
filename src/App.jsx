@@ -3935,47 +3935,84 @@ export default function RingsidePickemFinal() {
   };
 
   const simulateEventResult = (event) => {
-    const results = {};
-    // FIXED: Ensure consistent string keys for match IDs
-    event.matches.forEach(m => { 
-      const matchId = m.id.toString();
-      results[matchId] = Math.random() > 0.5 ? m.p1 : m.p2; 
-    });
-    setEventResults(prev => ({ ...prev, [event.id]: results }));
-    
-    if(user) {
-      // FIXED: Use 6 segment path for document writing: artifacts/appId/public/data/scores/global
-      setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', 'global'), { [event.id]: results }, { merge: true });
+    try {
+      console.log('🎲 Simulating event:', event.name);
+      console.log('📋 Matches to simulate:', event.matches);
       
-      let correctCount = 0;
-      const currentUserPreds = getCurrentUserPredictions();
-      const myPreds = currentUserPreds[event.id] || {};
+      if (!event.matches || event.matches.length === 0) {
+        console.warn('⚠️ No matches found in event');
+        alert('Cannot simulate: This event has no match card yet.');
+        return;
+      }
+      
+      const results = {};
+      // FIXED: Ensure consistent string keys for match IDs
       event.matches.forEach(m => { 
-        // FIXED: Use string key consistently
         const matchId = m.id.toString();
-        const pred = myPreds[matchId];
-        // Handle both old format (string) and new format (object)
-        const predictedWinner = typeof pred === 'string' ? pred : (pred?.winner || pred);
-        const actualWinner = results[matchId];
         
-        // Use fuzzy matching for wrestler names (handles "Cody" vs "Cody Rhodes")
-        if (predictedWinner && actualWinner && wrestlerNamesMatch(predictedWinner, actualWinner)) {
-          correctCount++;
+        // Handle different match structures
+        let winner;
+        if (m.p1 && m.p2) {
+          // Standard 1v1 or tag match
+          winner = Math.random() > 0.5 ? m.p1 : m.p2;
+        } else if (m.participants && m.participants.length > 0) {
+          // Multi-man match with participants array
+          const randomIndex = Math.floor(Math.random() * m.participants.length);
+          winner = m.participants[randomIndex].name || m.participants[randomIndex];
+        } else {
+          console.warn('⚠️ Match has no valid participants:', m);
+          winner = 'Unknown';
         }
+        
+        results[matchId] = winner;
+        console.log(`  Match ${matchId}: ${winner} wins`);
       });
       
-      setUserProfile(prev => ({
-          ...prev,
-          totalPoints: (prev.totalPoints || 0) + (correctCount * 10),
-          predictionsCorrect: (prev.predictionsCorrect || 0) + correctCount,
-          predictionsTotal: (prev.predictionsTotal || 0) + event.matches.length
-      }));
+      setEventResults(prev => ({ ...prev, [event.id]: results }));
+      console.log('✅ Results set in state:', results);
+      
+      if(user) {
+        // FIXED: Use 6 segment path for document writing: artifacts/appId/public/data/scores/global
+        setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'scores', 'global'), { [event.id]: results }, { merge: true })
+          .then(() => console.log('✅ Results saved to Firestore'))
+          .catch(err => console.error('❌ Error saving results:', err));
+        
+        let correctCount = 0;
+        const currentUserPreds = getCurrentUserPredictions();
+        const myPreds = currentUserPreds[event.id] || {};
+        event.matches.forEach(m => { 
+          // FIXED: Use string key consistently
+          const matchId = m.id.toString();
+          const pred = myPreds[matchId];
+          // Handle both old format (string) and new format (object)
+          const predictedWinner = typeof pred === 'string' ? pred : (pred?.winner || pred);
+          const actualWinner = results[matchId];
+          
+          // Use fuzzy matching for wrestler names (handles "Cody" vs "Cody Rhodes")
+          if (predictedWinner && actualWinner && wrestlerNamesMatch(predictedWinner, actualWinner)) {
+            correctCount++;
+          }
+        });
+        
+        console.log(`📊 Correct predictions: ${correctCount}/${event.matches.length}`);
+        
+        setUserProfile(prev => ({
+            ...prev,
+            totalPoints: (prev.totalPoints || 0) + (correctCount * 10),
+            predictionsCorrect: (prev.predictionsCorrect || 0) + correctCount,
+            predictionsTotal: (prev.predictionsTotal || 0) + event.matches.length
+        }));
 
-      updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), {
-        totalPoints: increment(correctCount * 10),
-        predictionsCorrect: increment(correctCount),
-        predictionsTotal: increment(event.matches.length)
-      });
+        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', user.uid), {
+          totalPoints: increment(correctCount * 10),
+          predictionsCorrect: increment(correctCount),
+          predictionsTotal: increment(event.matches.length)
+        }).then(() => console.log('✅ User stats updated'))
+          .catch(err => console.error('❌ Error updating user stats:', err));
+      }
+    } catch (error) {
+      console.error('❌ Error simulating event:', error);
+      alert(`Failed to simulate event: ${error.message}`);
     }
   };
 
