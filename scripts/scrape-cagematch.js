@@ -11,8 +11,8 @@ import https from 'https';
 import { writeFileSync, readFileSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, doc, setDoc, getDoc } from 'firebase/firestore';
+import { initializeApp, cert } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -26,37 +26,26 @@ let appId = 'default-app-id';
 
 function initFirebase() {
   try {
-    // Try to load environment variables
-    const envPath = join(__dirname, '../.env');
-    if (existsSync(envPath)) {
-      const envContent = readFileSync(envPath, 'utf-8');
-      const envVars = {};
-      envContent.split('\n').forEach(line => {
-        const match = line.match(/^([^#=]+)=(.+)$/);
-        if (match) {
-          envVars[match[1].trim()] = match[2].trim();
-        }
+    // Try to load service account key for Admin SDK
+    const serviceAccountPath = join(__dirname, '../serviceAccountKey.json');
+    if (existsSync(serviceAccountPath)) {
+      const serviceAccount = JSON.parse(readFileSync(serviceAccountPath, 'utf-8'));
+      
+      // Initialize Admin SDK with service account
+      initializeApp({
+        credential: cert(serviceAccount)
       });
       
-      if (envVars.VITE_FIREBASE_API_KEY && envVars.VITE_FIREBASE_API_KEY !== 'AIzaSyD...') {
-        const firebaseConfig = {
-          apiKey: envVars.VITE_FIREBASE_API_KEY,
-          authDomain: envVars.VITE_FIREBASE_AUTH_DOMAIN,
-          projectId: envVars.VITE_FIREBASE_PROJECT_ID,
-          storageBucket: envVars.VITE_FIREBASE_STORAGE_BUCKET,
-          messagingSenderId: envVars.VITE_FIREBASE_MESSAGING_SENDER_ID,
-          appId: envVars.VITE_FIREBASE_APP_ID
-        };
-        
-        const app = initializeApp(firebaseConfig);
-        db = getFirestore(app);
-        appId = envVars.VITE_FIREBASE_PROJECT_ID || 'default-app-id';
-        console.log('✅ Firebase initialized\n');
-        return true;
-      }
+      db = getFirestore();
+      appId = serviceAccount.project_id;
+      console.log('✅ Firebase Admin SDK initialized\n');
+      return true;
+    } else {
+      console.log('⚠️  serviceAccountKey.json not found, saving to JSON files only\n');
     }
   } catch (error) {
     console.log('⚠️  Firebase not configured, saving to JSON files only\n');
+    console.error(error);
   }
   return false;
 }
@@ -217,14 +206,11 @@ async function scrapePromotions() {
       console.log('🔥 Saving promotions to Firestore...');
       for (const promo of majorPromotions) {
         try {
-          await setDoc(
-            doc(db, 'artifacts', appId, 'public', 'data', 'promotions', promo.id),
-            {
+          await db.collection('artifacts').doc(appId).collection('public').doc('data')
+            .collection('promotions').doc(promo.id).set({
               ...promo,
               updatedAt: new Date().toISOString()
-            },
-            { merge: true }
-          );
+            }, { merge: true });
         } catch (error) {
           console.error(`  ⚠️  Error saving ${promo.name}:`, error.message);
         }
@@ -1079,6 +1065,17 @@ async function main() {
     writeFileSync(join(__dirname, '../data/events.json'), JSON.stringify(recentEvents, null, 2));
     console.log(`💾 Saved ${recentEvents.length} recent events to data/events.json`);
     
+    // Step 2.5: Try to scrape from ProFightDB as additional source
+    let profightdbEvents = [];
+    try {
+      console.log('\n🔍 Attempting to scrape from ProFightDB.com as additional source...');
+      const { scrapePPVEvents } = await import('./scrape-profightdb.js');
+      profightdbEvents = await scrapePPVEvents();
+      console.log(`✅ Found ${profightdbEvents.length} events from ProFightDB\n`);
+    } catch (error) {
+      console.log(`⚠️  ProFightDB scraping failed (continuing with Cagematch only): ${error.message}\n`);
+    }
+    
     // Step 3: Scrape upcoming PPVs for the next 3 months
     console.log('\n');
     const upcomingPPVs = await scrapeUpcomingPPVs();
@@ -1086,34 +1083,59 @@ async function main() {
     writeFileSync(join(__dirname, '../data/upcoming-ppvs.json'), JSON.stringify(upcomingPPVs, null, 2));
     console.log(`💾 Saved ${upcomingPPVs.length} upcoming PPVs to data/upcoming-ppvs.json`);
     
-    // Step 4: Scrape upcoming weekly shows
-    console.log('\n');
-    const weeklyShows = await scrapeUpcomingWeeklyShows();
+    // DEPRECATED: Weekly shows are no longer scraped
+    console.log('\n⚠️  Weekly shows are deprecated - skipping weekly show scraping');
+    const weeklyShows = []; // Empty array - weekly shows deprecated
     
-    writeFileSync(join(__dirname, '../data/weekly-shows.json'), JSON.stringify(weeklyShows, null, 2));
-    console.log(`💾 Saved ${weeklyShows.length} weekly shows to data/weekly-shows.json`);
-    
-    // Combine all events (recent + upcoming PPVs + weekly shows, removing duplicates)
-    // Also filter out "Saturday Night's Main Event" as requested
+    // Combine all events (recent + upcoming PPVs + ProFightDB, removing duplicates)
+    // Also filter out "Saturday Night's Main Event" and weekly shows
     const allEventsMap = new Map();
-    [...recentEvents, ...upcomingPPVs, ...weeklyShows]
-      .filter(event => !/saturday\s*night'?s\s*main\s*event/i.test(event.name))
+    [...recentEvents, ...upcomingPPVs, ...profightdbEvents]
+      .filter(event => {
+        // Filter out Saturday Night's Main Event
+        if (/saturday\s*night'?s\s*main\s*event/i.test(event.name)) return false;
+        // Filter out weekly shows
+        if (event.isWeekly) return false;
+        // Filter out events that match weekly show patterns
+        const weeklyPatterns = [
+          /dynamite/i, /collision/i, /rampage/i, /raw/i, /smackdown/i,
+          /nxt(?!\s*(takeover|stand|deliver|deadline|vengeance|battleground))/i,
+          /main\s*event/i, /superstars/i, /thunder/i, /nitro/i,
+          /impact(?!\s*(slammiversary|bound|hard|sacrifice|rebellion|against|genesis))/i,
+          /dark(?:\s|$)/i, /elevation/i, /world\s*tag/i, /strong/i, /road\s*to/i
+        ];
+        const isWeekly = weeklyPatterns.some(pattern => pattern.test(event.name));
+        return !isWeekly;
+      })
       .forEach(event => {
-        allEventsMap.set(event.id, event);
+        // Use event name as key for deduplication (ProFightDB and Cagematch may have different IDs)
+        const key = event.name.toLowerCase().trim();
+        if (!allEventsMap.has(key)) {
+          allEventsMap.set(key, event);
+        } else {
+          // Merge data from both sources if available
+          const existing = allEventsMap.get(key);
+          // Prefer ProFightDB matches if available (better results data)
+          if (event.source === 'profightdb' && event.matches && event.matches.length > 0) {
+            allEventsMap.set(key, { ...existing, ...event, matches: event.matches });
+          } else if (existing.matches && existing.matches.length === 0 && event.matches && event.matches.length > 0) {
+            // Use matches from whichever source has them
+            allEventsMap.set(key, { ...existing, matches: event.matches });
+          }
+        }
       });
     const allEvents = Array.from(allEventsMap.values());
     
-    console.log(`\n📊 Total unique events: ${allEvents.length}`);
+    console.log(`\n📊 Total unique events (PPVs only): ${allEvents.length}`);
     
     // Step 5: Scrape details for events and save to Firestore
     console.log('\n🔍 Scraping event details and match cards...\n');
     const eventsWithDetails = [];
     
-    // Prioritize upcoming PPVs, then weekly shows, then recent events (limit to 30 total)
+    // Prioritize upcoming PPVs, then recent events (limit to 30 total)
     const eventsToScrape = [
-      ...upcomingPPVs.slice(0, 10), // First 10 upcoming PPVs
-      ...weeklyShows.slice(0, 15),   // Next 15 weekly shows
-      ...recentEvents.slice(0, 10)   // Plus 10 recent events
+      ...upcomingPPVs.slice(0, 15), // First 15 upcoming PPVs
+      ...recentEvents.slice(0, 15)   // Plus 15 recent events
     ];
     
     // Deduplicate
@@ -1122,7 +1144,7 @@ async function main() {
       if (seenIds.has(e.id)) return false;
       seenIds.add(e.id);
       return true;
-    }).slice(0, 30); // Max 30 (increased to include weekly shows)
+    }).slice(0, 30); // Max 30 events (PPVs only - weekly shows deprecated)
     
     for (let i = 0; i < uniqueEventsToScrape.length; i++) {
       const event = uniqueEventsToScrape[i];
@@ -1159,11 +1181,8 @@ async function main() {
           if (eventDetails.posterUrl) docData.posterUrl = eventDetails.posterUrl;
           if (eventDetails.slug) docData.slug = eventDetails.slug;
           
-          await setDoc(
-            doc(db, 'artifacts', appId, 'public', 'data', 'events', eventDetails.id),
-            docData,
-            { merge: true }
-          );
+          await db.collection('artifacts').doc(appId).collection('public').doc('data')
+            .collection('events').doc(eventDetails.id).set(docData, { merge: true });
           console.log(`  ✅ Saved ${eventDetails.name} to Firestore`);
         } catch (error) {
           console.error(`  ⚠️  Error saving ${eventDetails.name}:`, error.message);

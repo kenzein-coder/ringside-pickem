@@ -43,6 +43,18 @@ function fetchHTML(url) {
   });
 }
 
+// Helper to check if event is a weekly show (DEPRECATED - filtering these out)
+function isWeeklyShow(eventName) {
+  const weeklyPatterns = [
+    /dynamite/i, /collision/i, /rampage/i, /raw/i, /smackdown/i,
+    /nxt(?!\s*(takeover|stand|deliver|deadline|vengeance|battleground))/i,
+    /main\s*event/i, /superstars/i, /thunder/i, /nitro/i,
+    /impact(?!\s*(slammiversary|bound|hard|sacrifice|rebellion|against|genesis))/i,
+    /dark(?:\s|$)/i, /elevation/i, /world\s*tag/i, /strong/i, /road\s*to/i
+  ];
+  return weeklyPatterns.some(pattern => pattern.test(eventName));
+}
+
 function parseEvents(html) {
   const events = [];
   const eventRowRegex = /<tr[^>]*class="TRow[^"]*"[^>]*>([\s\S]*?)<\/tr>/gi;
@@ -66,6 +78,11 @@ function parseEvents(html) {
       
       if (!seenEvents.has(eventId) && eventName.length > 0) {
         seenEvents.add(eventId);
+        
+        // DEPRECATED: Filter out weekly shows
+        if (isWeeklyShow(eventName)) {
+          continue; // Skip weekly shows
+        }
         
         // Filter for major promotions
         const majorPromoIds = ['1', '2287', '7', '5', '122'];
