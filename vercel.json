@@ -4,6 +4,7 @@
   "installCommand": "npm install",
   "framework": null,
   "ignoreCommand": "git diff --quiet HEAD^ HEAD ./",
+  "regions": ["arn1"],
   "crons": [
     {
       "path": "/api/scrape-wrestling-data",
