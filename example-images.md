@@ -56,3 +56,4 @@ You can test if an image URL works by:
 
 The app now prioritizes Cagematch images from Firestore, which should be the most reliable source.
 
+
