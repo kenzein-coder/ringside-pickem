@@ -1,0 +1,45 @@
+# Scrape Wrestling Data
+# Runs the Cagematch scraper and writes results to Firestore. No git commit/push.
+# Fixes: git exit 128 was likely from a previous step that tried to commit/push without permissions.
+
+name: Scrape Wrestling Data
+
+on:
+  schedule:
+    # Daily at 2 AM UTC (same as Vercel cron)
+    - cron: '0 2 * * *'
+  workflow_dispatch: # Allow manual run from Actions tab
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    # No contents: write — we don't push; avoids git 128 from push
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Scraper reads from .env file; create it from repo secrets (not committed)
+      - name: Create .env for scraper
+        run: |
+          cat << 'ENVFILE' > .env
+          VITE_FIREBASE_API_KEY=${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN=${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID=${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET=${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID=${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_APP_ID=${{ secrets.VITE_FIREBASE_APP_ID }}
+          ENVFILE
+
+      - name: Run scraper
+        run: npm run scrape

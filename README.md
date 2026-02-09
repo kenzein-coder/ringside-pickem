@@ -66,6 +66,21 @@ Wrestler images can be served from Firebase Storage for reliable delivery. To en
 
 The app is configured for Vercel deployment. The scraper runs automatically via Vercel Cron at 2 AM daily.
 
+### GitHub Actions (scrape)
+
+The workflow in `.github/workflows/scrape-wrestling-data.yml` runs the Cagematch scraper on a schedule (and manually via **Actions → Scrape Wrestling Data → Run workflow**). It does **not** commit or push to the repo (data is written to Firestore only), which avoids git permission errors (e.g. exit code 128).
+
+For the scraper to write to Firestore in Actions, add these as **repository secrets** (Settings → Secrets and variables → Actions):
+
+- `VITE_FIREBASE_API_KEY`
+- `VITE_FIREBASE_AUTH_DOMAIN`
+- `VITE_FIREBASE_PROJECT_ID`
+- `VITE_FIREBASE_STORAGE_BUCKET`
+- `VITE_FIREBASE_MESSAGING_SENDER_ID`
+- `VITE_FIREBASE_APP_ID`
+
+Use the same values as in your local `.env`. If secrets are missing, the workflow still runs but only saves to local JSON (no Firestore).
+
 ## Tech Stack
 
 - React + Vite
