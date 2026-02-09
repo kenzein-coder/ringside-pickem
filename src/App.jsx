@@ -1,13 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInAnonymously, 
+import {
+  signInAnonymously,
   signInWithCustomToken,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signInWithPopup,
-  GoogleAuthProvider,
   sendPasswordResetEmail,
   updatePassword,
   updateEmail,
@@ -15,14 +12,13 @@ import {
   signOut,
   onAuthStateChanged
 } from 'firebase/auth';
-import { 
-  getFirestore, 
-  collection, 
-  doc, 
-  setDoc, 
-  onSnapshot, 
-  query, 
-  orderBy, 
+import {
+  collection,
+  doc,
+  setDoc,
+  onSnapshot,
+  query,
+  orderBy,
   updateDoc,
   serverTimestamp,
   increment,
@@ -31,13 +27,16 @@ import {
   getDocs
 } from 'firebase/firestore';
 import {
-  getStorage,
   ref,
   uploadBytes,
   getDownloadURL,
   listAll,
   deleteObject
 } from 'firebase/storage';
+import { app, auth, db, storage, appId, googleProvider, firebaseError } from './config/firebase';
+import { seededRandom, getPopularityScore, generateSimulatedSentiment } from './utils/sentiment';
+import Toggle from './components/Toggle';
+import EventBanner from './components/EventBanner';
 import { 
   Trophy, 
   Calendar, 
@@ -63,58 +62,9 @@ import {
   Clock
 } from 'lucide-react';
 
-// --- Firebase Configuration ---
-const firebaseConfig = {
-    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-    appId: import.meta.env.VITE_FIREBASE_APP_ID
-  };
-
-// Validate Firebase config
-let firebaseError = null;
-let app, auth, db;
-
-try {
-  if (!firebaseConfig.apiKey) {
-    throw new Error('Firebase API Key is missing. Make sure VITE_FIREBASE_API_KEY is set in your .env file.');
-  }
-  if (firebaseConfig.apiKey.includes('...') || firebaseConfig.apiKey.includes('your_')) {
-    throw new Error('Firebase API Key appears to be a placeholder. Please replace with your actual API key.');
-  }
-  if (firebaseConfig.apiKey.length < 20) {
-    throw new Error('Firebase API Key is too short. Please check your .env file.');
-  }
-  app = initializeApp(firebaseConfig);
-  auth = getAuth(app);
-  db = getFirestore(app);
-} catch (error) {
-  console.error('❌ Firebase initialization error:', error);
-  firebaseError = error.message;
-}
-
-// Initialize Firebase Storage
-let storage = null;
-try {
-  if (app) {
-    storage = getStorage(app);
-  }
-} catch (error) {
-  console.error('❌ Firebase Storage initialization error:', error);
-}
-// Use Firebase project ID from config, fall back to __app_id or default
-const appId = firebaseConfig.projectId || (typeof __app_id !== 'undefined' ? __app_id : 'default-app-id');
-const googleProvider = new GoogleAuthProvider();
-// Configure Google provider to always show account selection
-googleProvider.setCustomParameters({
-  prompt: 'select_account'
-});
-
 // --- ASSETS ---
-// Alternative image sources for wrestlers - using public APIs that don't block sourcing
-// Priority: 1) Provided URLs, 2) Hardcoded Wikipedia Commons, 3) Wikimedia API search, 4) Proxy services, 5) Initials fallback
+// Image resolution prefers Firestore/Storage URLs (reliable, no CORS). Fallbacks: hardcoded, proxy, initials.
+// Priority: 1) Provided URLs, 2) Hardcoded, 3) Firestore cache, 4) Search/proxy, 5) Initials fallback
 
 // Cache for Wikimedia search results to avoid repeated API calls
 // To clear cache: wikimediaCache.clear() or restart the app
@@ -1122,86 +1072,6 @@ const PROMOTIONS = [
     { id: 'mlw', name: 'MLW', color: 'text-white', bg: 'bg-slate-900', border: 'border-white/30' },
 ];
 
-// --- COMMUNITY SENTIMENT SIMULATION ENGINE ---
-// Popular/Face wrestlers get more crowd support - generates realistic community sentiment
-const POPULARITY_SCORES = {
-  // Mega Stars (80-95% crowd support when facing heels)
-  'Cody Rhodes': 95, 'Roman Reigns': 90, 'The Rock': 95, 'John Cena': 92, 
-  'CM Punk': 88, 'Seth Rollins': 85, 'Rhea Ripley': 88, 'Becky Lynch': 87,
-  'Randy Orton': 82, 'Kevin Owens': 80, 'Sami Zayn': 85, 'Drew McIntyre': 78,
-  
-  // AEW Top Stars
-  'Kenny Omega': 88, 'MJF': 75, 'Jon Moxley': 82, 'Will Ospreay': 90,
-  'Hangman Adam Page': 80, 'Orange Cassidy': 85, 'Sting': 92, 'Darby Allin': 82,
-  'Chris Jericho': 78, 'Mercedes Moné': 80, 'Jamie Hayter': 78, 'Toni Storm': 82,
-  
-  // NJPW Stars
-  'Kazuchika Okada': 88, 'Hiroshi Tanahashi': 90, 'Tetsuya Naito': 85,
-  'Zack Sabre Jr.': 75, 'Shingo Takagi': 80, 'Hiromu Takahashi': 82,
-  
-  // TNA/Impact Stars
-  'Nic Nemeth': 80, 'Josh Alexander': 78, 'Jordynne Grace': 82, 'Moose': 72,
-  
-  // Tag Teams & Factions
-  'OG Bloodline': 88, 'Original Bloodline': 88, 'Team Rhea': 85, 'The Young Bucks': 70,
-  'FTR': 80, 'The Acclaimed': 82, 'House of Black': 72, 'Death Riders': 70,
-  'The Elite': 75, 'New Bloodline': 65, 'Team Liv': 72, 'Bloodline 2.0': 65,
-  
-  // Legends
-  'The Undertaker': 95, 'Triple H': 85, 'Shawn Michaels': 92, 'Stone Cold Steve Austin': 95,
-  'Hulk Hogan': 80, 'Ric Flair': 88,
-};
-
-// Generate a deterministic but seemingly random number based on string
-const seededRandom = (seed) => {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) {
-    hash = seed.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return Math.abs(Math.sin(hash) * 10000) % 1;
-};
-
-// Get popularity score for a wrestler (returns 50-80 for unknown wrestlers)
-const getPopularityScore = (name) => {
-  if (!name) return 60;
-  // Check direct match
-  if (POPULARITY_SCORES[name]) return POPULARITY_SCORES[name];
-  // Check if name contains a known wrestler
-  for (const [wrestler, score] of Object.entries(POPULARITY_SCORES)) {
-    if (name.toLowerCase().includes(wrestler.toLowerCase()) || 
-        wrestler.toLowerCase().includes(name.toLowerCase())) {
-      return score;
-    }
-  }
-  // Generate a consistent score based on name hash
-  return 50 + Math.floor(seededRandom(name) * 30);
-};
-
-// Generate simulated community sentiment for a match
-const generateSimulatedSentiment = (match, eventId) => {
-  const p1Score = getPopularityScore(match.p1);
-  const p2Score = getPopularityScore(match.p2);
-  
-  // Calculate base percentage with some variance
-  const totalScore = p1Score + p2Score;
-  let p1Base = (p1Score / totalScore) * 100;
-  
-  // Add some realistic variance based on match/event seed
-  const variance = seededRandom(`${eventId}-${match.id}`) * 12 - 6; // -6 to +6
-  p1Base = Math.min(85, Math.max(15, p1Base + variance)); // Clamp between 15-85%
-  
-  const p1Pct = Math.round(p1Base);
-  const p2Pct = 100 - p1Pct;
-  
-  // Generate realistic total picks (100-2000 based on match importance)
-  const isMainEvent = match.id === 1 || (match.title?.toLowerCase().includes('championship'));
-  const baseTotal = isMainEvent ? 800 : 300;
-  const totalVariance = Math.floor(seededRandom(`total-${eventId}-${match.id}`) * baseTotal);
-  const total = baseTotal + totalVariance;
-  
-  return { p1: p1Pct, p2: p2Pct, total, simulated: true };
-};
-
 const INITIAL_EVENTS = [
   {
     id: 'wwe-survivor-2025', promoId: 'wwe', name: 'Survivor Series', date: 'Nov 30, 2025', venue: 'Chicago, IL',
@@ -1865,62 +1735,6 @@ const WrestlerImage = ({ name, className, imageUrl }) => {
   );
 };
 
-const Toggle = ({ enabled, onClick }) => (
-  <div onClick={onClick} className={`w-12 h-6 rounded-full p-1 cursor-pointer transition-colors duration-200 ${enabled ? 'bg-red-600' : 'bg-slate-700'}`}>
-    <div className={`bg-white w-4 h-4 rounded-full shadow-md transform duration-200 ${enabled ? 'translate-x-6' : 'translate-x-0'}`} />
-  </div>
-);
-
-// Event Banner/Poster Component - handles loading event images with fallbacks
-const EventBanner = ({ event, className = "w-full h-full object-cover", fallbackClassName }) => {
-  const [currentImageUrl, setCurrentImageUrl] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [hasError, setHasError] = useState(false);
-  
-  useEffect(() => {
-    if (!event) return;
-    
-    setIsLoading(true);
-    setHasError(false);
-    
-    const loadEventImage = async () => {
-      try {
-        const imageUrl = await getEventImage(event);
-        setCurrentImageUrl(imageUrl);
-      } catch (error) {
-        console.log(`Failed to load event image for ${event.name}:`, error);
-        setHasError(true);
-        setCurrentImageUrl(`https://picsum.photos/seed/${event.id}/800/400`);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    
-    loadEventImage();
-  }, [event?.id, event?.name, event?.bannerUrl, event?.posterUrl]);
-  
-  const handleImageError = () => {
-    setHasError(true);
-    // Fallback to placeholder
-    setCurrentImageUrl(`https://picsum.photos/seed/${event?.id}/800/400`);
-  };
-  
-  if (!event) return null;
-  
-  return (
-    <img 
-      src={currentImageUrl || `https://picsum.photos/seed/${event.id}/800/400`}
-      alt={`${event.name} poster`}
-      className={className}
-      onError={handleImageError}
-      onLoad={() => setIsLoading(false)}
-      referrerPolicy="no-referrer"
-      crossOrigin="anonymous"
-      loading="lazy"
-    />
-  );
-};
-
 // --- MAIN APPLICATION ---
 
 export default function RingsidePickemFinal() {
@@ -1971,6 +1785,7 @@ export default function RingsidePickemFinal() {
   const [selectedMethod, setSelectedMethod] = useState({}); // { eventId-matchId: 'pinfall' }
   const [predictionsUserId, setPredictionsUserId] = useState(null); // Track which user's predictions we're showing
   const [eventTypeFilter, setEventTypeFilter] = useState('ppv'); // 'ppv', 'weekly', or 'past'
+  const [pickSavedFeedback, setPickSavedFeedback] = useState(null); // { eventId, matchId } — show "Saved" for 2s after pick
   
   // Use ref to track current user ID - this won't cause re-renders and is always current
   const currentUserIdRef = useRef(null);
@@ -2746,6 +2561,8 @@ export default function RingsidePickemFinal() {
     // newPreds only contains the actual prediction data, so it's safe to save
     setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'predictions', eventId), newPreds, { merge: true })
       .then(() => {
+        setPickSavedFeedback({ eventId, matchId: normalizedMatchId });
+        setTimeout(() => setPickSavedFeedback(null), 2000);
         if (process.env.NODE_ENV === 'development') {
           console.log('✅ PREDICTION SAVED SUCCESSFULLY:', {
             userId: user.uid,
@@ -3482,7 +3299,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                     setSelectedEvent(event); 
                     setActiveTab('event'); 
                   }} className="group relative bg-slate-900 hover:bg-slate-800 border border-slate-800 transition-all cursor-pointer rounded-2xl overflow-hidden shadow-xl" style={{ height: '200px' }}>
-                    <div className="absolute inset-0"><EventBanner event={event} className="w-full h-full object-cover opacity-60 group-hover:opacity-40 transition-opacity duration-500 group-hover:scale-105" /><div className="absolute inset-0 bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950"></div></div>
+                    <div className="absolute inset-0"><EventBanner event={event} getEventImage={getEventImage} className="w-full h-full object-cover opacity-60 group-hover:opacity-40 transition-opacity duration-500 group-hover:scale-105" /><div className="absolute inset-0 bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950"></div></div>
                     <div className="absolute inset-0 p-5 flex flex-col justify-end">
                       <div className="flex justify-between items-end">
                         <div className="flex-1">
@@ -3549,7 +3366,7 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
           <div className="pb-24 animate-slideUp">
             <button onClick={() => setActiveTab('home')} className="mb-4 text-slate-500 hover:text-white flex items-center gap-1 text-xs font-bold uppercase tracking-wider">← Feed</button>
             <div className="mb-6 relative h-48 rounded-2xl overflow-hidden shadow-2xl border border-slate-800">
-              <EventBanner event={selectedEvent} className="w-full h-full object-cover opacity-50" />
+              <EventBanner event={selectedEvent} getEventImage={getEventImage} className="w-full h-full object-cover opacity-50" />
               <div className="absolute inset-0 bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950 -z-10"></div>
               <div className="absolute inset-0 bg-gradient-to-t from-slate-950 to-transparent"></div>
               <div className="absolute bottom-0 left-0 p-6 w-full text-center"><div className="inline-block w-16 h-16 p-2 bg-slate-950/50 backdrop-blur-md rounded-xl border border-slate-700 mb-2 shadow-lg"><BrandLogo id={selectedEvent.promoId} /></div><h1 className="text-3xl font-black italic uppercase text-white shadow-black drop-shadow-lg">{selectedEvent.name}</h1></div>
@@ -3692,9 +3509,15 @@ VITE_FIREBASE_APP_ID=1:123:web:abc`}</pre>
                 const sentiment = communitySentiment[selectedEvent.id]?.[matchIdStr];
                 const matchKey = `${selectedEvent.id}-${matchIdStr}`;
                 
+                const showSavedFeedback = pickSavedFeedback?.eventId === selectedEvent.id && pickSavedFeedback?.matchId === matchIdStr;
                 return (
                   <div key={match.id} className="relative group">
-                    <div className="text-center mb-2"><span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-slate-900 px-3 py-1 rounded-full border border-slate-800">{match.title}</span></div>
+                    <div className="text-center mb-2 flex items-center justify-center gap-2 flex-wrap">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-slate-900 px-3 py-1 rounded-full border border-slate-800">{match.title}</span>
+                      {showSavedFeedback && (
+                        <span className="text-[9px] font-bold text-green-400 bg-green-500/20 px-2 py-0.5 rounded-full border border-green-500/50 animate-pulse">Saved</span>
+                      )}
+                    </div>
                     
                     {/* Community Sentiment Bar - Tug of War Style */}
                     {!actualWinner && (

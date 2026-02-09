@@ -40,11 +40,26 @@ A pro wrestling prediction app where users make picks on upcoming matches and co
    npm run dev
    ```
 
+## Images & Storage
+
+Wrestler images can be served from Firebase Storage for reliable delivery. To enable:
+
+1. **Apply CORS** to your Storage bucket (see `STORAGE_CORS_SETUP.md` for details):
+   ```bash
+   gsutil cors set cors.json gs://YOUR_BUCKET_NAME
+   ```
+2. **Upload images** (optional; populates Storage from the hardcoded list):
+   ```bash
+   npm run upload-images
+   ```
+   Note: Many source URLs (e.g. Wikimedia) may 404 or rate-limit; the app also uses Cagematch images from Firestore when available.
+
 ## Scripts
 
 - `npm run dev` - Start development server
 - `npm run build` - Build for production
 - `npm run scrape` - Scrape wrestling data from Cagematch.net
+- `npm run upload-images` - Upload wrestler images to Firebase Storage
 - `npm run reset-accounts` - Reset all user accounts (use with caution)
 
 ## Deployment
