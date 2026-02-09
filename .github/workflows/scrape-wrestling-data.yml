@@ -9,6 +9,10 @@ on:
     # Daily at 2 AM UTC (same as Vercel cron)
     - cron: '0 2 * * *'
   workflow_dispatch: # Allow manual run from Actions tab
+  push:
+    paths:
+      - 'scripts/scrape-cagematch.js'
+      - '.github/workflows/scrape-wrestling-data.yml'
 
 jobs:
   scrape:

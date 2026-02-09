@@ -1,21 +1,23 @@
 /**
  * Vercel Serverless Function for Scraping Wrestling Data
- * Runs on a schedule via Vercel Cron
- * 
- * Cron schedule: Runs daily at 2 AM UTC
- * 
- * To test locally: curl http://localhost:3000/api/scrape-wrestling-data
+ * Runs daily at 2 AM UTC via Vercel Cron
  */
 
 import https from 'https';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, setDoc } from 'firebase/firestore';
 
-// Rate limiting
-const DELAY_MS = 2000;
-
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+// Convert DD.MM.YYYY to "Month DD, YYYY" format
+function formatDate(dateStr) {
+  if (!dateStr) return null;
+  if (dateStr.match(/^[A-Z][a-z]{2} \d{1,2}, \d{4}$/)) return dateStr;
+  
+  const parts = dateStr.split('.');
+  if (parts.length === 3) {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${months[parseInt(parts[1]) - 1]} ${parseInt(parts[0])}, ${parts[2]}`;
+  }
+  return dateStr;
 }
 
 function fetchHTML(url) {
@@ -41,6 +43,18 @@ function fetchHTML(url) {
   });
 }
 
+// Helper to check if event is a weekly show (DEPRECATED - filtering these out)
+function isWeeklyShow(eventName) {
+  const weeklyPatterns = [
+    /dynamite/i, /collision/i, /rampage/i, /raw/i, /smackdown/i,
+    /nxt(?!\s*(takeover|stand|deliver|deadline|vengeance|battleground))/i,
+    /main\s*event/i, /superstars/i, /thunder/i, /nitro/i,
+    /impact(?!\s*(slammiversary|bound|hard|sacrifice|rebellion|against|genesis))/i,
+    /dark(?:\s|$)/i, /elevation/i, /world\s*tag/i, /strong/i, /road\s*to/i
+  ];
+  return weeklyPatterns.some(pattern => pattern.test(eventName));
+}
+
 function parseEvents(html) {
   const events = [];
   const eventRowRegex = /<tr[^>]*class="TRow[^"]*"[^>]*>([\s\S]*?)<\/tr>/gi;
@@ -64,6 +78,11 @@ function parseEvents(html) {
       
       if (!seenEvents.has(eventId) && eventName.length > 0) {
         seenEvents.add(eventId);
+        
+        // DEPRECATED: Filter out weekly shows
+        if (isWeeklyShow(eventName)) {
+          continue; // Skip weekly shows
+        }
         
         // Filter for major promotions
         const majorPromoIds = ['1', '2287', '7', '5', '122'];
@@ -120,12 +139,15 @@ export default async function handler(req, res) {
         const db = getFirestore(app);
         const appId = process.env.VITE_FIREBASE_PROJECT_ID || 'default-app-id';
         
-        for (const event of events.slice(0, 20)) { // Limit to 20 per run
+        for (const event of events.slice(0, 20)) {
           try {
+            const promoIdMap = { '1': 'wwe', '2287': 'aew', '7': 'njpw', '5': 'tna', '122': 'roh' };
             await setDoc(
               doc(db, 'artifacts', appId, 'public', 'data', 'events', event.id),
               {
                 ...event,
+                date: formatDate(event.date),
+                promoId: promoIdMap[event.promotionId] || null,
                 updatedAt: new Date().toISOString(),
                 scrapedAt: new Date().toISOString()
               },
