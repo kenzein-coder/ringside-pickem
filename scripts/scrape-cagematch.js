@@ -542,8 +542,9 @@ function getKnownUpcomingPPVs() {
       venue: 'TBD', 
       isPPV: true,
       matches: [
-        { id: 1, p1: '6 Men', p2: 'Chamber Match', title: 'Elimination Chamber' },
-        { id: 2, p1: '6 Women', p2: 'Chamber Match', title: "Women's Elimination Chamber" }
+        // When WWE announces Men's Chamber entrants, add participants: ['Name1','Name2',...] (up to 6). App shows grid of competitors.
+        { id: 1, p1: '6 Men', p2: 'Chamber Match', title: 'Elimination Chamber', participants: [] },
+        { id: 2, p1: '6 Women', p2: 'Chamber Match', title: "Women's Elimination Chamber", participants: [] }
       ]
     },
     

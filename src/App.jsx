@@ -1059,6 +1059,15 @@ const WRESTLER_IMAGES = {
   'Ric Flair': 'https://upload.wikimedia.org/wikipedia/commons/8/8c/Ric_Flair_2014.jpg',
 };
 
+// Fallback background images for event cards (used when EventBanner has no image)
+const EVENT_BACKGROUNDS = {
+  'wwe-survivor-2025': 'https://images.unsplash.com/photo-1514525253440-b393452e3383?q=80&w=800&auto=format&fit=crop',
+  'aew-worlds-end-2025': 'https://images.unsplash.com/photo-1574602321946-e27ef6933432?q=80&w=800&auto=format&fit=crop',
+  'njpw-wk20': 'https://images.unsplash.com/photo-1533577116850-9cc66cad8a9b?q=80&w=800&auto=format&fit=crop',
+  'tna-hardto-2026': 'https://images.unsplash.com/photo-1511250503134-894f5c67634a?q=80&w=800&auto=format&fit=crop',
+  'roh-final-battle-2025': 'https://images.unsplash.com/photo-1599582319422-d7b77ce17332?q=80&w=800&auto=format&fit=crop',
+};
+
 const PROMOTIONS = [
     { id: 'wwe', name: 'WWE', color: 'text-blue-500', bg: 'bg-slate-900', border: 'border-blue-500/30' },
     { id: 'aew', name: 'AEW', color: 'text-yellow-400', bg: 'bg-slate-900', border: 'border-yellow-500/30' },
