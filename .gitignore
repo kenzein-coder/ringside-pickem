@@ -50,3 +50,6 @@ serviceAccountKey.json
 *secrets*.md
 *credentials*.md
 .vercel
+
+# Nested copy (removed as submodule; use root only)
+ringside-pickem/
