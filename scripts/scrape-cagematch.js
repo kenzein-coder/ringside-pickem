@@ -1206,8 +1206,21 @@ async function main() {
     
   } catch (error) {
     console.error('❌ Fatal error:', error);
+    console.error('Stack:', error.stack);
     process.exit(1);
   }
 }
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error);
+  process.exit(1);
+});
 
 main();

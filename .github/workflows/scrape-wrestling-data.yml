@@ -31,18 +31,37 @@ jobs:
       - name: Install dependencies
         run: npm ci
       
+      - name: Verify Node.js and dependencies
+        run: |
+          echo "Node version: $(node --version)"
+          echo "NPM version: $(npm --version)"
+          echo "Checking critical dependencies..."
+          node -e "import('firebase-admin').then(() => console.log('✅ firebase-admin installed')).catch(e => { console.error('❌ firebase-admin error:', e); process.exit(1); })"
+      
       - name: Create data directory
         run: mkdir -p data
       
       - name: Setup Firebase Service Account
         run: |
-          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > serviceAccountKey.json
-          chmod 600 serviceAccountKey.json
+          if [ -z "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}" ]; then
+            echo "⚠️  FIREBASE_SERVICE_ACCOUNT secret not set, scraper will run in local-only mode"
+          else
+            echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > serviceAccountKey.json
+            chmod 600 serviceAccountKey.json
+            echo "✅ Service account key file created"
+          fi
       
       - name: Run scraper
-        run: node scripts/scrape-cagematch.js
+        timeout-minutes: 30
+        run: |
+          echo "🚀 Starting scraper..."
+          node scripts/scrape-cagematch.js || {
+            echo "❌ Scraper failed with exit code $?"
+            exit 1
+          }
         env:
           NODE_ENV: production
+        continue-on-error: false
       
       - name: Cleanup service account key
         if: always()

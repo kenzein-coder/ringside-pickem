@@ -469,6 +469,7 @@ export default function RingsidePickemFinal() {
             ) : (
               myEvents.map(event => {
                 const promo = PROMOTIONS.find(p => p.id === event.promoId);
+                const promoId = promo?.id ?? event.promoId ?? 'wwe';
                 const bgImage = EVENT_BACKGROUNDS[event.id] || EVENT_BACKGROUNDS['wwe-survivor-2025'];
                 const isGraded = eventResults[event.id];
                 return (
@@ -478,7 +479,7 @@ export default function RingsidePickemFinal() {
                       <div className="flex justify-between items-end">
                         <div className="flex-1">
                           <div className="mb-3 flex items-center gap-2">
-                             <div className="w-10 h-10 p-1 bg-slate-950/80 rounded-lg backdrop-blur-sm border border-slate-800"><BrandLogo id={promo.id} /></div>
+                             <div className="w-10 h-10 p-1 bg-slate-950/80 rounded-lg backdrop-blur-sm border border-slate-800"><BrandLogo id={promoId} /></div>
                              {isGraded && <div className="bg-green-500/20 text-green-400 px-2 py-1 rounded text-[10px] font-black uppercase flex items-center gap-1"><CheckCircle size={10} /> Complete</div>}
                           </div>
                           <h4 className="font-black text-2xl text-white leading-none mb-1 italic uppercase shadow-black drop-shadow-md">{event.name}</h4>

@@ -12,7 +12,7 @@ import http from 'http';
 import { writeFileSync, readFileSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { initializeApp, cert } from 'firebase-admin/app';
+import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -27,6 +27,16 @@ let appId = 'default-app-id';
 
 function initFirebase() {
   try {
+    // Check if Firebase is already initialized (e.g., by scrape-cagematch.js)
+    if (getApps().length > 0) {
+      db = getFirestore();
+      // Try to get appId from existing app or use default
+      const existingApp = getApps()[0];
+      appId = existingApp.options?.projectId || 'default-app-id';
+      console.log('✅ Using existing Firebase Admin SDK instance\n');
+      return true;
+    }
+    
     const serviceAccountPath = join(__dirname, '../serviceAccountKey.json');
     if (existsSync(serviceAccountPath)) {
       const serviceAccount = JSON.parse(readFileSync(serviceAccountPath, 'utf-8'));
@@ -39,6 +49,14 @@ function initFirebase() {
       return true;
     }
   } catch (error) {
+    // If error is "already initialized", that's okay - use existing instance
+    if (error.message && error.message.includes('already been initialized')) {
+      db = getFirestore();
+      const existingApp = getApps()[0];
+      appId = existingApp.options?.projectId || 'default-app-id';
+      console.log('✅ Using existing Firebase Admin SDK instance\n');
+      return true;
+    }
     console.log('⚠️  Firebase not configured, saving to JSON files only\n');
   }
   return false;
@@ -48,7 +66,7 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function fetchHTML(url) {
+function fetchHTML(url, timeout = 10000) {
   return new Promise((resolve, reject) => {
     const options = {
       headers: {
@@ -60,7 +78,7 @@ function fetchHTML(url) {
     // Use http for HTTP URLs, https for HTTPS URLs
     const client = url.startsWith('https://') ? https : http;
     
-    client.get(url, options, (res) => {
+    const req = client.get(url, options, (res) => {
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
       res.on('end', () => {
@@ -70,7 +88,23 @@ function fetchHTML(url) {
           reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
         }
       });
-    }).on('error', reject);
+    });
+    
+    // Set timeout on the request socket
+    req.setTimeout(timeout, () => {
+      req.destroy();
+      reject(new Error(`Request timeout after ${timeout}ms for ${url}`));
+    });
+    
+    // Handle connection timeout
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error(`Connection timeout after ${timeout}ms for ${url}`));
+    });
+    
+    req.on('error', (err) => {
+      reject(new Error(`Request failed: ${err.message} for ${url}`));
+    });
   });
 }
 
@@ -445,52 +479,139 @@ async function scrapeEventDetails(event) {
     if (matches.length > 0) {
       console.log(`🖼️  Fetching wrestler images...`);
       const wrestlerSlugs = new Set();
+      const existingImages = new Map(); // Track existing images to avoid duplicate work
       
-      // Collect all unique wrestler slugs
+      // Collect all unique wrestler slugs and check for existing images
       matches.forEach(match => {
         if (match.p1Members) {
           match.p1Members.forEach(m => {
-            if (m.profightdbSlug) wrestlerSlugs.add(m.profightdbSlug);
+            if (m.profightdbSlug) {
+              // Only add to fetch list if image doesn't already exist
+              if (m.image) {
+                existingImages.set(m.profightdbSlug, m.image);
+              } else {
+                wrestlerSlugs.add(m.profightdbSlug);
+              }
+            }
           });
         }
         if (match.p2Members) {
           match.p2Members.forEach(m => {
-            if (m.profightdbSlug) wrestlerSlugs.add(m.profightdbSlug);
+            if (m.profightdbSlug) {
+              // Only add to fetch list if image doesn't already exist
+              if (m.image) {
+                existingImages.set(m.profightdbSlug, m.image);
+              } else {
+                wrestlerSlugs.add(m.profightdbSlug);
+              }
+            }
           });
         }
       });
       
-      // Fetch images for all wrestlers (with rate limiting)
-      const imageMap = {};
+      // Start with existing images
+      const imageMap = new Map(existingImages);
       const slugsToFetch = Array.from(wrestlerSlugs);
-      let fetchedCount = 0;
+      const skippedCount = existingImages.size;
+      let wave1Fetched = 0;
+      let wave2Fetched = 0;
+      let failedCount = 0;
       
-      console.log(`  📋 Fetching images for ${slugsToFetch.length} wrestlers...`);
+      console.log(`  📋 Found ${slugsToFetch.length} wrestlers needing images${skippedCount > 0 ? ` (${skippedCount} already have images)` : ''}...`);
       
-      for (const slug of slugsToFetch) {
-        const imageUrl = await getWrestlerImageFromProFightDB(slug);
-        if (imageUrl) {
-          imageMap[slug] = imageUrl;
-          fetchedCount++;
+      if (slugsToFetch.length === 0) {
+        console.log(`  ✅ All wrestlers already have images!`);
+      } else {
+        // Process in waves: first 30, then remaining
+        const maxWrestlersPerWave = 30;
+        const firstWave = slugsToFetch.slice(0, maxWrestlersPerWave);
+        const secondWave = slugsToFetch.slice(maxWrestlersPerWave);
+        
+        // First wave
+        console.log(`  🌊 Wave 1: Processing first ${firstWave.length} wrestlers...`);
+        for (let i = 0; i < firstWave.length; i++) {
+          const slug = firstWave[i];
+          try {
+            const imageUrl = await Promise.race([
+              getWrestlerImageFromProFightDB(slug),
+              new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Timeout')), 15000)
+              )
+            ]);
+            
+            if (imageUrl) {
+              imageMap.set(slug, imageUrl);
+              wave1Fetched++;
+            }
+            
+            // Progress update every 5 wrestlers
+            if ((i + 1) % 5 === 0) {
+              console.log(`  ⏳ Wave 1 Progress: ${i + 1}/${firstWave.length} wrestlers processed...`);
+            }
+          } catch (error) {
+            failedCount++;
+            // Continue with next wrestler on error
+          }
         }
+        
+        console.log(`  ✅ Wave 1 complete: Fetched ${wave1Fetched}/${firstWave.length} new images`);
+        
+        // Second wave (remaining wrestlers)
+        if (secondWave.length > 0) {
+          console.log(`  🌊 Wave 2: Processing remaining ${secondWave.length} wrestlers...`);
+          
+          for (let i = 0; i < secondWave.length; i++) {
+            const slug = secondWave[i];
+            // Skip if we already have this image (from wave 1 or existing)
+            if (imageMap.has(slug)) {
+              continue;
+            }
+            
+            try {
+              const imageUrl = await Promise.race([
+                getWrestlerImageFromProFightDB(slug),
+                new Promise((_, reject) => 
+                  setTimeout(() => reject(new Error('Timeout')), 15000)
+                )
+              ]);
+              
+              if (imageUrl) {
+                imageMap.set(slug, imageUrl);
+                wave2Fetched++;
+              }
+              
+              // Progress update every 5 wrestlers
+              if ((i + 1) % 5 === 0) {
+                console.log(`  ⏳ Wave 2 Progress: ${i + 1}/${secondWave.length} wrestlers processed...`);
+              }
+            } catch (error) {
+              failedCount++;
+              // Continue with next wrestler on error
+            }
+          }
+          
+          console.log(`  ✅ Wave 2 complete: Fetched ${wave2Fetched}/${secondWave.length} new images`);
+        }
+        
+        const totalFetched = wave1Fetched + wave2Fetched;
+        const totalImages = imageMap.size;
+        console.log(`  ✅ Total: ${totalImages} wrestler images (${totalFetched} newly fetched, ${skippedCount} already existed)${failedCount > 0 ? `, ${failedCount} failed` : ''}`);
       }
-      
-      console.log(`  ✅ Fetched ${fetchedCount}/${slugsToFetch.length} wrestler images`);
       
       // Update matches with image URLs
       matches.forEach(match => {
         if (match.p1Members) {
           match.p1Members.forEach(m => {
-            if (m.profightdbSlug && imageMap[m.profightdbSlug]) {
-              m.image = imageMap[m.profightdbSlug];
+            if (m.profightdbSlug && imageMap.has(m.profightdbSlug)) {
+              m.image = imageMap.get(m.profightdbSlug);
             }
           });
           match.p1Image = match.p1Members[0]?.image || null;
         }
         if (match.p2Members) {
           match.p2Members.forEach(m => {
-            if (m.profightdbSlug && imageMap[m.profightdbSlug]) {
-              m.image = imageMap[m.profightdbSlug];
+            if (m.profightdbSlug && imageMap.has(m.profightdbSlug)) {
+              m.image = imageMap.get(m.profightdbSlug);
             }
           });
           match.p2Image = match.p2Members[0]?.image || null;
