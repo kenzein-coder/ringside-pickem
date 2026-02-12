@@ -36,6 +36,9 @@ build
 # Test data files
 data/
 *.html
+# Allow Vite entry (required for build)
+!index.html
+!**/index.html
 
 # Firebase Admin SDK service account key (contains sensitive credentials)
 serviceAccountKey.json
