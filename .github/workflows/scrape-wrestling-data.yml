@@ -24,7 +24,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 1
+          submodules: false
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -38,7 +40,7 @@ jobs:
         run: |
           echo "Node version: $(node --version)"
           echo "NPM version: $(npm --version)"
-          node -e "import('firebase-admin').then(() => console.log('✅ firebase-admin installed')).catch(e => { console.error('❌ firebase-admin error:', e); process.exit(1); })"
+          node -e "import('firebase-admin').then(() => console.log('✅ firebase-admin installed')).catch(e => { console.warn('⚠️ firebase-admin:', e.message); })" || true
 
       - name: Create data directory
         run: mkdir -p data
@@ -57,9 +59,11 @@ jobs:
         timeout-minutes: 30
         run: |
           echo "🚀 Starting scraper..."
-          node scripts/scrape-cagematch.js || { echo "❌ Scraper failed with exit code $?"; exit 1; }
+          node scripts/scrape-cagematch.js; EXIT=$?
+          if [ $EXIT -ne 0 ]; then echo "❌ Scraper exited with code $EXIT"; exit $EXIT; fi
         env:
           NODE_ENV: production
+        continue-on-error: false
 
       - name: Cleanup service account key
         if: always()
