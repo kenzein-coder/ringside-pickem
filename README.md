@@ -40,16 +40,46 @@ A pro wrestling prediction app where users make picks on upcoming matches and co
    npm run dev
    ```
 
+## Images & Storage
+
+Wrestler images can be served from Firebase Storage for reliable delivery. To enable:
+
+1. **Apply CORS** to your Storage bucket (see `STORAGE_CORS_SETUP.md` for details):
+   ```bash
+   gsutil cors set cors.json gs://YOUR_BUCKET_NAME
+   ```
+2. **Upload images** (optional; populates Storage from the hardcoded list):
+   ```bash
+   npm run upload-images
+   ```
+   Note: Many source URLs (e.g. Wikimedia) may 404 or rate-limit; the app also uses Cagematch images from Firestore when available.
+
 ## Scripts
 
 - `npm run dev` - Start development server
 - `npm run build` - Build for production
 - `npm run scrape` - Scrape wrestling data from Cagematch.net
+- `npm run upload-images` - Upload wrestler images to Firebase Storage
 - `npm run reset-accounts` - Reset all user accounts (use with caution)
 
 ## Deployment
 
 The app is configured for Vercel deployment. The scraper runs automatically via Vercel Cron at 2 AM daily.
+
+### GitHub Actions (scrape)
+
+The workflow in `.github/workflows/scrape-wrestling-data.yml` runs the Cagematch scraper on a schedule (and manually via **Actions → Scrape Wrestling Data → Run workflow**). It does **not** commit or push to the repo (data is written to Firestore only), which avoids git permission errors (e.g. exit code 128).
+
+For the scraper to write to Firestore in Actions, add these as **repository secrets** (Settings → Secrets and variables → Actions):
+
+- `VITE_FIREBASE_API_KEY`
+- `VITE_FIREBASE_AUTH_DOMAIN`
+- `VITE_FIREBASE_PROJECT_ID`
+- `VITE_FIREBASE_STORAGE_BUCKET`
+- `VITE_FIREBASE_MESSAGING_SENDER_ID`
+- `VITE_FIREBASE_APP_ID`
+
+Use the same values as in your local `.env`. If secrets are missing, the workflow still runs but only saves to local JSON (no Firestore).
 
 ## Tech Stack
 
